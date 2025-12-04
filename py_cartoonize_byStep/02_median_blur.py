@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 
+K_SIZE = 5  # Kernel size for median blur, must be odd
+
 def hls_bubble_sort_kernel(window_list):
     """ Same hardware-friendly sort as before """
     buffer = list(window_list) # Copy to avoid reference issues
@@ -11,7 +13,7 @@ def hls_bubble_sort_kernel(window_list):
                 buffer[j], buffer[j+1] = buffer[j+1], buffer[j]
     return buffer
 
-def median_blur_line_buffer_model(img, ksize=3):
+def median_blur_line_buffer_model(img, ksize=K_SIZE):
     height, width = img.shape
     output = np.zeros((height, width), dtype=np.uint8)
     
