@@ -81,7 +81,7 @@ def bilateral_filter_hls_model(img, d=5, sigmaColor=60, sigmaSpace=60):
 
 
 def main():
-    img = cv2.imread("py_cartoonize_byStep/input/Things-to-do-in-Delft.jpg")
+    img = cv2.imread("D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\input\\Things-to-do-in-Delft.jpg")
     if img is None:
         print("Image not found")
         return
@@ -93,9 +93,9 @@ def main():
         sigmaSpace=75
     )
 
-    output_path = "py_cartoonize_byStep/output/step4_bilateral.jpg"
+    output_path = "D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\output\\step4_bilateral.jpg"
     cv2.imwrite(output_path, filtered)
-    print("Saved step4_bilateral.jpg")
+    print(f"Saved {output_path}")
 
 
 if __name__ == "__main__":
