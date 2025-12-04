@@ -2,76 +2,101 @@ import cv2
 import numpy as np
 import math
 
-def gaussian(x, sigma):
-    return (1.0 / (2 * math.pi * (sigma ** 2))) * math.exp(-(x ** 2) / (2 * (sigma ** 2)))
 
-def bilateral_filter_hls_model(img, d, sigmaColor, sigmaSpace):
-    """
-    Unpacked version of cv2.bilateralFilter.
-    Logic: Weighted sum based on Spatial Distance AND Color Difference.
-    """
-    height, width, channels = img.shape
+def gaussian(diff, sigma):
+    return math.exp(-(diff * diff) / (2 * sigma * sigma))
+
+
+def bilateral_filter_hls_model(img, d=5, sigmaColor=60, sigmaSpace=60):
+    height, width, ch = img.shape
     output = np.zeros_like(img)
-    pad = d // 2
-    
-    # Pre-compute spatial gaussian weights to save time (HLS Lookup Table)
-    space_weights = np.zeros((d, d))
+
+    center = d // 2
+
+    # ------------ LINE BUFFER (BRAM) ------------
+    line_buffer = np.zeros((d - 1, width, ch), dtype=np.uint8)
+
+    # ------------ WINDOW BUFFER (REGS) ----------
+    window = np.zeros((d, d, ch), dtype=np.uint8)
+
+    # ------------ PRECOMPUTE SPATIAL ------------
+    spatial = np.zeros((d, d))
     for i in range(d):
         for j in range(d):
-            dist = math.sqrt((i - pad)**2 + (j - pad)**2)
-            space_weights[i, j] = gaussian(dist, sigmaSpace)
+            dy = i - center
+            dx = j - center
+            spatial[i, j] = gaussian(math.sqrt(dx * dx + dy * dy), sigmaSpace)
 
-    print("Processing Bilateral Filter (Warning: Very slow in pure Python)...")
-    
-    # Iterate pixels
-    for y in range(pad, height - pad):
-        if y % 10 == 0: print(f"Processing row {y}/{height}") # Progress bar
-        for x in range(pad, width - pad):
-            
-            # We process 3 channels (B, G, R)
-            for c in range(channels):
-                pixel_val = img[y, x, c]
-                norm_factor = 0.0
-                pixel_sum = 0.0
-                
-                # Iterate Kernel
-                for ky in range(d):
-                    for kx in range(d):
-                        neighbor_y = y - pad + ky
-                        neighbor_x = x - pad + kx
-                        neighbor_val = img[neighbor_y, neighbor_x, c]
-                        
-                        # 1. Spatial Weight (from pre-computed table)
-                        w_space = space_weights[ky, kx]
-                        
-                        # 2. Color/Range Weight (Intensity difference)
-                        # In HLS, this exp() is usually replaced by a pre-computed LUT 
-                        # mapped to the range 0-255 diff.
-                        diff = float(neighbor_val) - float(pixel_val)
-                        w_color = gaussian(diff, sigmaColor)
-                        
-                        weight = w_space * w_color
-                        
-                        pixel_sum += neighbor_val * weight
-                        norm_factor += weight
-                
-                # Normalize and assign
-                output[y, x, c] = int(pixel_sum / norm_factor)
-                
+    for y in range(height):
+        if y % 20 == 0:
+            print(f"Row {y+1}/{height}")
+
+        for x in range(width):
+
+            new_px = img[y, x]
+
+            # 1) SHIFT WINDOW LEFT
+            window[:, :-1, :] = window[:, 1:, :]
+
+            # 2) COLUMN FROM LINE BUFFER + NEW PIXEL
+            if y >= 1:
+                col = line_buffer[:, x, :].copy()
+                window[:-1, -1, :] = col
+            else:
+                window[:-1, -1, :] = 0
+
+            window[-1, -1, :] = new_px
+
+            # 3) UPDATE LINE BUFFER (same as median-blur model)
+            if d > 1:
+                line_buffer[:-1, x, :] = line_buffer[1:, x, :]
+                line_buffer[-1, x, :] = new_px
+
+            # 4) VALID OUTPUT?
+            if y >= d - 1 and x >= d - 1:
+
+                out_y = y - center
+                out_x = x - center
+
+                for c in range(ch):
+                    center_val = window[center, center, c]
+
+                    norm = 0.0
+                    wsum = 0.0
+
+                    for i in range(d):
+                        for j in range(d):
+                            neigh = window[i, j, c]
+                            diff = float(neigh) - float(center_val)
+
+                            w_color = gaussian(diff, sigmaColor)
+                            w = spatial[i, j] * w_color
+
+                            wsum += neigh * w
+                            norm += w
+
+                    output[out_y, out_x, c] = int(wsum / (norm + 1e-8))
+
     return output
 
-def main():
-    # Load original colored image
-    img = cv2.imread("input_image.jpg") 
-    if img is None: return
 
-    # For demonstration, we use smaller parameters than the notebook because
-    # pure Python implementation is extremely slow.
-    # Notebook used: d=10, sigma=250.
-    filtered = bilateral_filter_hls_model(img, d=5, sigmaColor=75, sigmaSpace=75)
-    
-    cv2.imwrite("step4_bilateral.jpg", filtered)
+def main():
+    img = cv2.imread("py_cartoonize_byStep/input/Things-to-do-in-Delft.jpg")
+    if img is None:
+        print("Image not found")
+        return
+
+    filtered = bilateral_filter_hls_model(
+        img,
+        d=5,
+        sigmaColor=75,
+        sigmaSpace=75
+    )
+
+    output_path = "py_cartoonize_byStep/output/step4_bilateral.jpg"
+    cv2.imwrite(output_path, filtered)
     print("Saved step4_bilateral.jpg")
+
 
 if __name__ == "__main__":
     main()
