@@ -229,7 +229,7 @@ int main() {
         // Save output
         saveBMP("output/step4_bilateral_.bmp", filtered);
 
-        std::cout << "Saved output/step4_bilateral.bmp\n";
+        std::cout << "Saved output/step4_bilateral_2.bmp\n";
     }
     catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
