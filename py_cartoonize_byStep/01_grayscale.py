@@ -34,7 +34,7 @@ def rgb2gray_hls_model(img):
     return gray_img
 
 def main():
-    input_path = "D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\input\\Things-to-do-in-Delft.jpg"
+    input_path = "D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\input\\delft_2.png"
     img = cv2.imread(input_path)
     if img is None:
         print("Image not found.")
@@ -43,7 +43,7 @@ def main():
     print("Running Grayscale HLS Model...")
     gray = rgb2gray_hls_model(img)
     
-    output_path = "D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\output\\step1_gray.jpg"
+    output_path = "D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\output\\step1_gray_delft_2.png"
     cv2.imwrite(output_path, gray)
     print(f"Saved {output_path}")
 

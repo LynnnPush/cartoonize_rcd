@@ -101,7 +101,7 @@ def adaptive_threshold_optimized(img, max_value=255, ksize=7, C=7):
 
 def main():
     # Update to your actual path
-    input_path = "D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\output\\step2_median_blur.jpg"
+    input_path = "D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\output\\step2_median_blur_delft_2.png"
     img = cv2.imread(input_path, cv2.IMREAD_GRAYSCALE)
     
     if img is None:
@@ -112,7 +112,7 @@ def main():
     edges = adaptive_threshold_optimized(img, max_value=255, ksize=7, C=7)
     
     # Save
-    output_path = "D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\output\\step3_adaptThresh_optimized.jpg"
+    output_path = "D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\output\\step3_adaptThresh_optimized_delft_2.png"
     cv2.imwrite(output_path, edges)
     print(f"Saved optimized result to {output_path}")
 

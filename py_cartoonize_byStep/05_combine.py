@@ -29,8 +29,8 @@ def bitwise_and_mask_hls_model(src, mask):
 
 def main():
     # Load results from previous steps
-    color_img = cv2.imread("step4_bilateral.jpg")
-    edge_mask = cv2.imread("step3_edges.jpg", cv2.IMREAD_GRAYSCALE)
+    color_img = cv2.imread("D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\output\\step4_bilateral.jpg")
+    edge_mask = cv2.imread("D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\output\\step3_adaptThresh_optimized.jpg", cv2.IMREAD_GRAYSCALE)
     
     if color_img is None or edge_mask is None:
         print("Missing inputs from previous steps.")
@@ -44,8 +44,9 @@ def main():
     print("Running Combination HLS Model...")
     cartoon = bitwise_and_mask_hls_model(color_img, edge_mask)
     
-    cv2.imwrite("final_cartoon.jpg", cartoon)
-    print("Saved final_cartoon.jpg")
+    output_path = "D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\output\\step5_final_cartoon.jpg"
+    cv2.imwrite(output_path, cartoon)
+    print(f"Saved {output_path}")
 
 if __name__ == "__main__":
     main()
