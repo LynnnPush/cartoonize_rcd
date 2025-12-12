@@ -183,8 +183,9 @@ void adaptive_threshold(pixel_stream &src, pixel_stream &dst)
     }
 }
 
-// Stream() function for streamulator testbench
-void stream(pixel_stream &src, pixel_stream &dst, int frame)
+// Optional standalone stream wrapper for testing this stage only
+void adaptive_threshold_stream(pixel_stream &src, pixel_stream &dst, int frame)
 {
+    (void)frame;
     adaptive_threshold(src, dst);
 }
