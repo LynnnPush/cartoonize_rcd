@@ -7,7 +7,7 @@
 // CONFIGURATION CONSTANTS
 // WIDTH and K_SIZE are used from the included headers
 // =========================================================================
-#define K_PAD (D / 2) // D comes from 04_bilateral_filter_gaussian_data.hpp
+#define BF_PAD (D / 2) // D comes from 04_bilateral_filter_gaussian_data.hpp
 
 // Helper struct for easier RGB access (B, G, R order matches your initial code)
 struct rgb_pixel {
@@ -111,7 +111,7 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
     // Output valid only after window is filled (D-1 in y and D-1 in x)
     if (y >= D - 1 && x >= D - 1) {
         
-        rgb_pixel center_px = window_buffer[K_PAD][K_PAD];
+        rgb_pixel center_px = window_buffer[BF_PAD][BF_PAD];
 
         // Process R, G, B channels independently
         for (int c = 0; c < 3; c++) {
