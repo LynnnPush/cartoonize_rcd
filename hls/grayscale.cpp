@@ -59,3 +59,9 @@ void grayscale(pixel_stream &src, pixel_stream &dst)
         x++;
     }
 }
+
+// Stream() function for streamulator testbench
+void stream(pixel_stream &src, pixel_stream &dst, int frame)
+{
+    grayscale(src, dst);
+}

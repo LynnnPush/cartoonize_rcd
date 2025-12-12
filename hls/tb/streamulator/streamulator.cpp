@@ -1,7 +1,7 @@
 // Streamulator test platform
 
 #include "streamulator.h"
-#include "../../04_bilateral_filter_gaussian_data.hpp"   // replace with desired processing module
+#include "../../grayscale.hpp"   // replace with desired processing module
 
 
 /* Load image from file into pixel stream
