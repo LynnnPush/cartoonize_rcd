@@ -145,8 +145,9 @@ void median_blur(pixel_stream &src, pixel_stream &dst){
     }
 }
 
-// Stream() function for streamulator testbench
-void stream(pixel_stream &src, pixel_stream &dst, int frame)
+// Optional standalone stream wrapper for testing this stage only
+void median_blur_stream(pixel_stream &src, pixel_stream &dst, int frame)
 {
+    (void)frame;
     median_blur(src, dst);
 }

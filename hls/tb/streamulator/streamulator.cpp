@@ -1,7 +1,7 @@
 // Streamulator test platform
 
 #include "streamulator.h"
-#include "../../median_blur.h"   // replace with desired processing module
+#include "../../cartoonize_pipeline.h"   // combined median blur + adaptive threshold pipeline
 
 
 /* Load image from file into pixel stream
@@ -237,4 +237,3 @@ int main ()
 
 	return 0;
 }
-
