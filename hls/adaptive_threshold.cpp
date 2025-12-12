@@ -2,11 +2,6 @@
 
 void adaptive_threshold(pixel_stream &src, pixel_stream &dst)
 {
-    // Interface pragmas
-    #pragma HLS INTERFACE axis port=src
-    #pragma HLS INTERFACE axis port=dst
-    #pragma HLS INTERFACE ap_ctrl_none port=return
-
     // Optimization: Pipeline the loop with Initiation Interval = 1
     #pragma HLS PIPELINE II=1
 

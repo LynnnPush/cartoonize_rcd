@@ -35,22 +35,6 @@ static void bitwise_and_mask(pixel_stream &color, pixel_stream &mask, pixel_stre
     dst << p_out;
 }
 
-// Combined sub-pipeline: median blur -> adaptive threshold (edge mask)
-// void median_blur_adaptive_threshold(pixel_stream &src, pixel_stream &dst) {
-//     #pragma HLS INTERFACE axis port=src
-//     #pragma HLS INTERFACE axis port=dst
-//     #pragma HLS INTERFACE ap_ctrl_none port=return
-//     #pragma HLS DATAFLOW
-
-//     pixel_stream gray_stream("gray_stream");
-//     pixel_stream blurred_stream("blurred_stream");
-//     #pragma HLS STREAM variable=gray_stream depth=64
-//     #pragma HLS STREAM variable=blurred_stream depth=64
-
-//     grayscale(src, gray_stream);
-//     median_blur(gray_stream, blurred_stream);
-//     adaptive_threshold(blurred_stream, dst);
-// }
 
 // Full cartoonize pipeline: bilateral filter + adaptive threshold + mask composite
 void cartoonize_pipeline(pixel_stream &src, pixel_stream &dst) {
@@ -65,6 +49,7 @@ void cartoonize_pipeline(pixel_stream &src, pixel_stream &dst) {
     pixel_stream gray_stream("gray_stream");
     pixel_stream median_stream("median_stream");
     pixel_stream mask_stream("mask_stream");
+
     #pragma HLS STREAM variable=raw_to_bilateral depth=64
     #pragma HLS STREAM variable=raw_to_gray depth=64
     #pragma HLS STREAM variable=color_stream depth=64

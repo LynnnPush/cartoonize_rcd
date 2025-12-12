@@ -37,9 +37,6 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
     // ----------------------------------------------------------------------
     // 0. INTERFACES & PRAGMAS
     // ----------------------------------------------------------------------
-    #pragma HLS INTERFACE axis port=src
-    #pragma HLS INTERFACE axis port=dst
-    #pragma HLS INTERFACE ap_ctrl_none port=return
     #pragma HLS PIPELINE II=1 // Target Initiation Interval of 1
 
     // ----------------------------------------------------------------------

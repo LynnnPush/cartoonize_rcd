@@ -32,10 +32,6 @@ void hls_bubble_sort(uint8_t input_arr[NUM_ELEMENTS], uint8_t &median) {
 }
 
 void median_blur(pixel_stream &src, pixel_stream &dst){
-    // Interface directives
-    #pragma HLS INTERFACE axis port=src
-    #pragma HLS INTERFACE axis port=dst
-    #pragma HLS INTERFACE ap_ctrl_none port=return
     #pragma HLS PIPELINE II=1
 
     // Internal Buffers

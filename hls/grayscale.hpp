@@ -1,13 +1,9 @@
 #ifndef GRAYSCALE_HPP
 #define GRAYSCALE_HPP
 
-#include <hls_stream.h>
-#include <ap_axi_sdata.h>
 #include <stdint.h>
 
-// Type Definitions
-typedef ap_axiu<32, 1, 1, 1> pixel_data;
-typedef hls::stream<pixel_data> pixel_stream;
+#include "pixel_types.hpp"
 
 // Macros for Color Extraction
 #define rgba2r(v) ((v) & 0xFF)

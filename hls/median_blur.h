@@ -2,19 +2,15 @@
 #define MEDIAN_BLUR_HPP
 
 #include <ap_int.h>     
-#include <hls_stream.h> 
-#include <ap_axi_sdata.h>
 #include <stdint.h>
+
+#include "pixel_types.hpp"
 
 // Constants
 #define K_SIZE 5
 #define WIDTH 1280
 #define HEIGHT 720
 #define NUM_ELEMENTS (K_SIZE * K_SIZE)
-
-// Data Types
-typedef ap_axiu<32,1,1,1> pixel_data;
-typedef hls::stream<pixel_data> pixel_stream;
 
 // Macros for RGB/Grayscale extraction
 #define rgba2r(v) ((v)&0xFF)

@@ -2,6 +2,7 @@
 #define KERNELS_HPP
 
 #include <cstddef>
+#include <stdint.h>
 
 constexpr std::size_t D = 11; // Kernel dimension
 constexpr std::size_t COLOR_LUT_SIZE = 256;

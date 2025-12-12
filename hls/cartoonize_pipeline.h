@@ -1,13 +1,10 @@
 #ifndef CARTOONIZE_PIPELINE_HPP
 #define CARTOONIZE_PIPELINE_HPP
 
-#include <hls_stream.h>
-#include <ap_axi_sdata.h>
+#include <stdint.h>
 #include <ap_int.h>
 
-// Shared stream types
-typedef ap_axiu<32, 1, 1, 1> pixel_data;
-typedef hls::stream<pixel_data> pixel_stream;
+#include "pixel_types.hpp"
 
 // Forward declarations of stage functions
 void grayscale(pixel_stream &src, pixel_stream &dst);
