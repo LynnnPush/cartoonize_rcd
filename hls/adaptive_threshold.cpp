@@ -158,8 +158,8 @@ void adaptive_threshold(pixel_stream &src, pixel_stream &dst)
             result_pixel = 0;
         }
     } else {
-        // Output black while priming buffers (border handling)
-        result_pixel = 0;
+        // Keep mask open during warm-up so borders don't get forced to black
+        result_pixel = MAX_VAL;
     }
 
     // Pack Result (Replicate to RGB for display consistency)

@@ -124,8 +124,8 @@ void median_blur(pixel_stream &src, pixel_stream &dst){
         p_out.data = r2rgba(median_val) | g2rgba(median_val) | b2rgba(median_val);
     }
     else {
-        // Not enough data yet, output black pixel
-        p_out.data = 0;
+        // Not enough data yet, fall back to pass-through pixel to avoid black borders
+        p_out.data = r2rgba(new_pixel) | g2rgba(new_pixel) | b2rgba(new_pixel);
     }
 
     // Write output pixel metadata and update counters

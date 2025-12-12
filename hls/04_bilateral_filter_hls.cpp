@@ -104,9 +104,8 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
     // ----------------------------------------------------------------------
     // 4. BILATERAL FILTER CORE LOGIC
     // ----------------------------------------------------------------------
-    
     pixel_data p_out = p_in; 
-    rgb_pixel result_pixel = {0, 0, 0};
+    rgb_pixel result_pixel = new_pixel; // default to pass-through while window warms up
 
     // Output valid only after window is filled (D-1 in y and D-1 in x)
     if (y >= D - 1 && x >= D - 1) {
