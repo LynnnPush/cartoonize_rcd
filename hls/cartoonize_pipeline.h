@@ -10,6 +10,7 @@ typedef ap_axiu<32, 1, 1, 1> pixel_data;
 typedef hls::stream<pixel_data> pixel_stream;
 
 // Forward declarations of stage functions
+void grayscale(pixel_stream &src, pixel_stream &dst);
 void bilateral_filter(pixel_stream &src, pixel_stream &dst);
 void median_blur(pixel_stream &src, pixel_stream &dst);
 void adaptive_threshold(pixel_stream &src, pixel_stream &dst);

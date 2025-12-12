@@ -60,8 +60,9 @@ void grayscale(pixel_stream &src, pixel_stream &dst)
     }
 }
 
-// Stream() function for streamulator testbench
-void stream(pixel_stream &src, pixel_stream &dst, int frame)
+// Optional standalone stream wrapper for testing this stage only
+void grayscale_stream(pixel_stream &src, pixel_stream &dst, int frame)
 {
+    (void)frame;
     grayscale(src, dst);
 }
