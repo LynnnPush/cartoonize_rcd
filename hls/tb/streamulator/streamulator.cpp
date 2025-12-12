@@ -1,7 +1,7 @@
 // Streamulator test platform
 
 #include "streamulator.h"
-#include "../../adaptive_threshold.h"   // replace with desired processing module
+#include "../../median_blur.h"   // replace with desired processing module
 
 
 /* Load image from file into pixel stream
