@@ -1,7 +1,16 @@
 #include "adaptive_threshold.h"
-#include "04_bilateral_filter_gaussian_data.hpp"
-#include <cmath>
+//#include "04_bilateral_filter_gaussian_data.hpp"
+#include "04_bilateral_filter_kernels_fixed.hpp"
 #include <ap_int.h>
+#include "04_bilateral_reciprocal_lut.hpp"
+
+
+#include <ap_fixed.h>
+
+// Accumulator types
+typedef ap_ufixed<24,8>  wsum_t;   // up to ~121, enough headroom
+typedef ap_ufixed<32,16> vsum_t;   // up to ~32000
+
 
 // =========================================================================
 // CONFIGURATION CONSTANTS
@@ -117,8 +126,9 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
         for (int c = 0; c < 3; c++) {
             #pragma HLS UNROLL // Process all 3 channels in parallel
             
-            float w_sum = 0.0f;
-            float val_sum = 0.0f;
+            wsum_t w_sum = 0;
+            vsum_t val_sum = 0;
+
             uint8_t center_val = center_px.val[c];
 
             // Convolve over the 5x5 window (Fully Unrolled 25 taps in parallel)
@@ -135,19 +145,38 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
                     int diff_abs = (diff_int ^ (diff_int >> 31)) - (diff_int >> 31);
                     
                     // 2. Look up Weights (from on-chip ROMs)
-                    float w_s = SPATIAL_KERNEL[i][j];
-                    float w_c = COLOR_LUT[diff_abs]; 
-                    
-                    float w = w_s * w_c;
+                    weight_t w_s = SPATIAL_KERNEL_FX[i][j];
+                    weight_t w_c = COLOR_LUT_FX[diff_abs];
+
+                    weight_t w = w_s * w_c;
 
                     // 3. Accumulate
                     w_sum   += w;
-                    val_sum += (float)neighbor_val * w;
+                    val_sum += w * neighbor_val;
                 }
             }
 
-            // 4. Normalize (Division on FPGA)
-            result_pixel.val[c] = (uint8_t)(val_sum / (w_sum + 1e-10f));
+            // 4. Normalize (reciprocal LUT + multiply)
+            // Quantize w_sum to LUT index
+            ap_uint<8> recip_idx = w_sum.to_uint();
+            if (recip_idx == 0) recip_idx = 1;
+            if (recip_idx > 255) recip_idx = 255;
+            recip_idx -= 1;
+
+
+            // Lookup reciprocal
+            recip_t inv_w = RECIP_LUT[recip_idx];
+
+            // Normalize
+            ap_ufixed<32,16> norm = val_sum * inv_w;
+
+            // Clamp and assign
+            if (norm > 255)
+                result_pixel.val[c] = 255;
+            else
+                result_pixel.val[c] = (uint8_t)norm;
+
+
         }
     }
 
