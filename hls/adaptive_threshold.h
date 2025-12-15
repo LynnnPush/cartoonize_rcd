@@ -1,15 +1,13 @@
 #ifndef ADAPTIVE_THRESHOLD_HPP
 #define ADAPTIVE_THRESHOLD_HPP
 
-#include <hls_stream.h>
-#include <ap_axi_sdata.h>
 #include <ap_int.h>
+#include <stdint.h>
+#include "pixel_types.hpp"
 
 // --------------------------------------------------------------------------
-// Typedefs (Matching canny.hpp structure)
+// Typedefs
 // --------------------------------------------------------------------------
-typedef ap_axiu<32, 1, 1, 1> pixel_data;
-typedef hls::stream<pixel_data> pixel_stream;
 
 // Macros for extracting RGB (We only need Red/Gray for this module)
 #define rgba2r(v) ((v)&0xFF)

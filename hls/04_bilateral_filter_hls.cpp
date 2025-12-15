@@ -46,9 +46,6 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
     // ----------------------------------------------------------------------
     // 0. INTERFACES & PRAGMAS
     // ----------------------------------------------------------------------
-    #pragma HLS INTERFACE axis port=src
-    #pragma HLS INTERFACE axis port=dst
-    #pragma HLS INTERFACE ap_ctrl_none port=return
     #pragma HLS PIPELINE II=1 // Target Initiation Interval of 1
 
     // ----------------------------------------------------------------------
@@ -113,9 +110,8 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
     // ----------------------------------------------------------------------
     // 4. BILATERAL FILTER CORE LOGIC
     // ----------------------------------------------------------------------
-    
     pixel_data p_out = p_in; 
-    rgb_pixel result_pixel = {0, 0, 0};
+    rgb_pixel result_pixel = new_pixel; // default to pass-through while window warms up
 
     // Output valid only after window is filled (D-1 in y and D-1 in x)
     if (y >= D - 1 && x >= D - 1) {

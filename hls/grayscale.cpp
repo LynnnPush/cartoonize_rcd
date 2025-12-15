@@ -2,10 +2,6 @@
 
 void grayscale(pixel_stream &src, pixel_stream &dst)
 {
-
-    #pragma HLS INTERFACE axis port=src
-    #pragma HLS INTERFACE axis port=dst
-    #pragma HLS INTERFACE ap_ctrl_none port=return
     #pragma HLS PIPELINE II=1
 
     static uint16_t x = 0;
@@ -60,8 +56,9 @@ void grayscale(pixel_stream &src, pixel_stream &dst)
     }
 }
 
-// Stream() function for streamulator testbench
-void stream(pixel_stream &src, pixel_stream &dst, int frame)
+// Optional standalone stream wrapper for testing this stage only
+void grayscale_stream(pixel_stream &src, pixel_stream &dst, int frame)
 {
+    (void)frame;
     grayscale(src, dst);
 }

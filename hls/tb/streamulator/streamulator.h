@@ -19,10 +19,10 @@
 #define HEIGHT 720
 
 // Image paths
-#define INPUT_DIR  "C:/Users/leoca/OneDrive/Desktop/RCD/Code/cartoonize_rcd/hls/tb/inframe/"
-#define OUTPUT_DIR "C:/Users/leoca/OneDrive/Desktop/RCD/Code/cartoonize_rcd/hls/tb/outframe/"
+#define INPUT_DIR  "D:/PracticeProject/TUD_RClab/cartoonize_rcd/hls/tb/inframe/"
+#define OUTPUT_DIR "D:/PracticeProject/TUD_RClab/cartoonize_rcd/hls/tb/outframe/"
 
-#define FRAMES_LIST "C:/Users/leoca/OneDrive/Desktop/RCD/Code/cartoonize_rcd/hls/tb/inframe/frames.txt"
+#define FRAMES_LIST "D:/PracticeProject/TUD_RClab/cartoonize_rcd/hls/tb/inframe/frames.txt"
 
 //#define RAW_FILENAME "../../../../outframes/raw.png"
 
