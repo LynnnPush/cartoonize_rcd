@@ -58,6 +58,7 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
     // LINE BUFFER: Stores D-1 (4) rows of RGB pixels
     static rgb_pixel line_buffer[D - 1][WIDTH];
     #pragma HLS ARRAY_PARTITION variable=line_buffer dim=1 complete // Partition row index (D-1) for parallel read
+    #pragma HLS BIND_STORAGE variable=line_buffer type=ram_2p impl=bram // FORCE the implementation to BRAM (RAM_2P or RAM_S2P)
     #pragma HLS DEPENDENCE variable=line_buffer inter false // Optimize access pattern
 
     // WINDOW BUFFER: The active DxD (5x5) pixel kernel
@@ -92,18 +93,26 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
 
     // Fill Rightmost Column (Update)
     if (x < WIDTH) {
-        // 1. Fill top D-1 pixels from line buffer (circular logic)
+        // 1) Read each bank with a constant index (HLS can map banks to RAM cleanly)
+        rgb_pixel col_bank[D - 1];
+        #pragma HLS ARRAY_PARTITION variable=col_bank complete dim=0
+        for (int r = 0; r < D - 1; r++) {
+            #pragma HLS UNROLL
+            col_bank[r] = line_buffer[r][x];
+        }
+
+        // 2) Rotate into the window using line_idx (rotation happens in regs now)
         for (int i = 0; i < D - 1; i++) {
             #pragma HLS UNROLL
-            // Calculate cyclic index to read chronologically correct rows
-            uint8_t row_offset = (line_idx + i) % (D - 1); 
-            window_buffer[i][D - 1] = line_buffer[row_offset][x];
+            int idx = line_idx + i;
+            if (idx >= (D - 1)) idx -= (D - 1);   // cheap wrap instead of %
+            window_buffer[i][D - 1] = col_bank[idx];
         }
-        
-        // 2. Bottom pixel is the current incoming pixel
+
+        // 3) Bottom pixel is current input
         window_buffer[D - 1][D - 1] = new_pixel;
 
-        // 3. Update Line Buffer with new pixel (overwriting oldest line)
+        // 4) Update line buffer (one bank write)
         line_buffer[line_idx][x] = new_pixel;
     }
 
@@ -198,7 +207,7 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
 }
 
 // Optional standalone stream wrapper for testing this stage only
-void stream(pixel_stream &src, pixel_stream &dst, int frame)
+void bilateral_filter_stream(pixel_stream &src, pixel_stream &dst, int frame)
 {
     (void)frame;
     bilateral_filter(src, dst);

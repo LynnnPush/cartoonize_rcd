@@ -17,7 +17,8 @@ void adaptive_threshold(pixel_stream &src, pixel_stream &dst)
     // A. Line Buffer: Stores K-1 rows of pixels
     //    Partitioned to allow reading a full column in one cycle.
     static uint8_t line_buffer[K_SIZE - 1][WIDTH];
-    #pragma HLS ARRAY_PARTITION variable=line_buffer dim=1 complete
+    #pragma HLS ARRAY_PARTITION variable=line_buffer dim=1 complete // Partition row index (K_SIZE-1) for parallel read
+    #pragma HLS BIND_STORAGE variable=line_buffer type=ram_2p impl=bram // FORCE the implementation to BRAM (RAM_2P or RAM_S2P)
     #pragma HLS DEPENDENCE variable=line_buffer inter false
 
     // B. Window Buffer: The active KxK pixel kernel
@@ -80,18 +81,21 @@ void adaptive_threshold(pixel_stream &src, pixel_stream &dst)
         // We read the *old* pixels to form the column
         
         // 1. Fill top K-1 pixels of the new column from line buffer
+        uint8_t col_bank[K_SIZE - 1];
+        #pragma HLS ARRAY_PARTITION variable=col_bank complete dim=0
+        for (int r = 0; r < K_SIZE - 1; r++) {
+            #pragma HLS UNROLL
+            col_bank[r] = line_buffer[r][x];
+        }
+
         for (int i = 0; i < K_SIZE - 1; i++) {
             #pragma HLS UNROLL
-            // Calculate cyclic index logic to read chronologically correct rows
-            uint8_t row_offset = (line_idx + i) % (K_SIZE - 1);
-            uint8_t val = line_buffer[row_offset][x];
-            window_buffer[i][K_SIZE - 1] = val;
+            int idx = line_idx + i;
+            if (idx >= (K_SIZE - 1)) idx -= (K_SIZE - 1);
+            window_buffer[i][K_SIZE - 1] = col_bank[idx];
         }
-        
-        // 2. Bottom pixel is the current incoming pixel
-        window_buffer[K_SIZE - 1][K_SIZE - 1] = new_pixel;
 
-        // 3. Update Line Buffer with new pixel (overwriting oldest line)
+        window_buffer[K_SIZE - 1][K_SIZE - 1] = new_pixel;
         line_buffer[line_idx][x] = new_pixel;
     }
 

@@ -42,6 +42,7 @@ void median_blur(pixel_stream &src, pixel_stream &dst){
     // Line Buffer: K-1 rows
     static uint8_t line_buffer[K_SIZE - 1][WIDTH];
     #pragma HLS ARRAY_PARTITION variable=line_buffer dim=1 complete
+    #pragma HLS BIND_STORAGE variable=line_buffer type=ram_2p impl=bram // FORCE the implementation to BRAM (RAM_2P or RAM_S2P)
     #pragma HLS DEPENDENCE variable=line_buffer inter false
 
     // Window Buffer: KxK pixel 
@@ -78,18 +79,22 @@ void median_blur(pixel_stream &src, pixel_stream &dst){
     
     
     if (x < WIDTH) {
-        // Fill the rightmost column of the window
+        uint8_t col_bank[K_SIZE - 1];
+        #pragma HLS ARRAY_PARTITION variable=col_bank complete dim=0
+
+        for (int r = 0; r < K_SIZE - 1; r++) {
+            #pragma HLS UNROLL
+            col_bank[r] = line_buffer[r][x];
+        }
+
         for (int i = 0; i < K_SIZE - 1; i++) {
             #pragma HLS UNROLL
-
-            uint8_t index = (cnt + i) % (K_SIZE - 1);
-            window_buffer[i][K_SIZE - 1] = line_buffer[index][x];
+            int idx = cnt + i;
+            if (idx >= (K_SIZE - 1)) idx -= (K_SIZE - 1);
+            window_buffer[i][K_SIZE - 1] = col_bank[idx];
         }
-        
-        // Bottom pixel is the current incoming pixel
-        window_buffer[K_SIZE - 1][K_SIZE - 1] = new_pixel;
 
-        // Store new pixel in line buffer
+        window_buffer[K_SIZE - 1][K_SIZE - 1] = new_pixel;
         line_buffer[cnt][x] = new_pixel;
     }
 

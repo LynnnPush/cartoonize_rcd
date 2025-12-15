@@ -25,7 +25,7 @@
 #define HEIGHT 720
 
 // Adaptive Threshold Parameters
-#define K_SIZE 7
+#define K_SIZE 5
 #define K_PAD (K_SIZE / 2)
 #define K_AREA (K_SIZE * K_SIZE)
 #define C_CONST 7
