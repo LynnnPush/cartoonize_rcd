@@ -154,7 +154,8 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
 
             // 4. Normalize (reciprocal LUT + multiply)
             // Quantize w_sum to LUT index
-            ap_uint<8> recip_idx = w_sum.to_uint();
+            wsum_t w_sum_rounded = w_sum + wsum_t(0.5);
+            ap_uint<8> recip_idx = w_sum_rounded.to_uint();
             if (recip_idx == 0) recip_idx = 1;
             if (recip_idx > 255) recip_idx = 255;
             recip_idx -= 1;
@@ -197,7 +198,7 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
 }
 
 // Optional standalone stream wrapper for testing this stage only
-void bilateral_filter_stream(pixel_stream &src, pixel_stream &dst, int frame)
+void stream(pixel_stream &src, pixel_stream &dst, int frame)
 {
     (void)frame;
     bilateral_filter(src, dst);
