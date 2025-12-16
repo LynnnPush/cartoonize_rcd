@@ -152,8 +152,10 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
                     // 2. Look up Weights (from on-chip ROMs)
                     weight_t w_s = SPATIAL_KERNEL_FX[i][j];
                     weight_t w_c = COLOR_LUT_FX[diff_abs];
-
-                    weight_t w = w_s * w_c;
+                    weight_t w = w_s * w_c;  
+                    
+                    // TEST: Replace w_s with 1.0 as currently all elements in SPATIAL_KERNEL_FX are ~1.0              
+                    // weight_t w = w_c;
 
                     // 3. Accumulate
                     w_sum   += w;
@@ -166,7 +168,7 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
             wsum_t w_sum_rounded = w_sum + wsum_t(0.5);
             ap_uint<8> recip_idx = w_sum_rounded.to_uint();
             if (recip_idx == 0) recip_idx = 1;
-            if (recip_idx > 255) recip_idx = 255;
+            if (recip_idx > 31) recip_idx = 31;
             recip_idx -= 1;
 
 
