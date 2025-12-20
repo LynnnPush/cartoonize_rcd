@@ -11,14 +11,16 @@ void grayscale(pixel_stream &src, pixel_stream &dst);
 void bilateral_filter(pixel_stream &src, pixel_stream &dst);
 void median_blur(pixel_stream &src, pixel_stream &dst);
 void adaptive_threshold(pixel_stream &src, pixel_stream &dst);
+// Debug helper: simple pass-through stage
+void pixel_passthrough(pixel_stream &src, pixel_stream &dst);
 
 // Combined sub-pipeline: median blur -> adaptive threshold (edge mask)
 void median_blur_adaptive_threshold(pixel_stream &src, pixel_stream &dst);
 
 // Full cartoonize pipeline: bilateral color smoothing + edge mask + composite
-void cartoonize_pipeline(pixel_stream &src, pixel_stream &dst);
+void cartoonize_pipeline(axis_stream &src, axis_stream &dst);
 
 // Top-level entry for streamulator/testbench
-void stream(pixel_stream &src, pixel_stream &dst, int frame);
+void stream(axis_stream &src, axis_stream &dst, int frame);
 
 #endif

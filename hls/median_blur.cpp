@@ -102,6 +102,9 @@ void median_blur(pixel_stream &src, pixel_stream &dst){
     // 2. Median Calculation
     // ----------------------------------------------------------------------
 
+    // Copy metadata first (user/last/keep/strb/id/dest)
+    p_out = p_in;
+
     // We can only compute median once we have filled the buffer enough
     if (y >= K_SIZE - 1 && x >= K_SIZE - 1) {
         // Flatten window for sorting
@@ -122,16 +125,14 @@ void median_blur(pixel_stream &src, pixel_stream &dst){
         hls_bubble_sort(flat_window, median_val);
 
         // Prepare output pixel
-        p_out.data = r2rgba(median_val) | g2rgba(median_val) | b2rgba(median_val);
+        p_out.data = r2rgba(median_val) | g2rgba(median_val) | b2rgba(median_val) |
+                     (p_in.data & 0xFF000000);
     }
     else {
         // Not enough data yet, fall back to pass-through pixel to avoid black borders
-        p_out.data = r2rgba(new_pixel) | g2rgba(new_pixel) | b2rgba(new_pixel);
+        p_out.data = r2rgba(new_pixel) | g2rgba(new_pixel) | b2rgba(new_pixel) |
+                     (p_in.data & 0xFF000000);
     }
-
-    // Write output pixel metadata and update counters
-    p_out.user = p_in.user;
-    p_out.last = p_in.last;
 
     dst << p_out;
 

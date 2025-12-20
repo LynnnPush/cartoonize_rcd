@@ -161,8 +161,9 @@ void adaptive_threshold(pixel_stream &src, pixel_stream &dst)
         result_pixel = MAX_VAL;
     }
 
-    // Pack Result (Replicate to RGB for display consistency)
-    p_out.data = r2rgba(result_pixel) | g2rgba(result_pixel) | b2rgba(result_pixel);
+    // Pack Result (Replicate to RGB for display consistency) and preserve MSB/alpha
+    p_out.data = r2rgba(result_pixel) | g2rgba(result_pixel) | b2rgba(result_pixel) |
+                 (p_in.data & 0xFF000000);
     
     // Write to Output
     dst << p_out;

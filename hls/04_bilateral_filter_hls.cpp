@@ -192,7 +192,8 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
     // 5. OUTPUT & COORDINATE UPDATES
     // ----------------------------------------------------------------------
 
-    p_out.data = pack_rgb(result_pixel);
+    // Preserve MSB/alpha from input
+    p_out.data = pack_rgb(result_pixel) | (p_in.data & 0xFF000000);
     
     dst << p_out; // Write to Output stream
 

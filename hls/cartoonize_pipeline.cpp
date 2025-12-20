@@ -13,6 +13,27 @@ static void duplicate_stream(pixel_stream &src, pixel_stream &dst_a, pixel_strea
 }
 
 // ----------------------------------------------------------------------
+// Helper: AXI stream -> internal pixel stream (one pixel per call)
+// ----------------------------------------------------------------------
+static void axis_to_pixel(axis_stream &s_axis, pixel_stream &dst) {
+    #pragma HLS INLINE off
+    #pragma HLS PIPELINE II=1
+    axis_pixel in_ax;
+    s_axis >> in_ax;
+
+    pixel_data p;
+    p.data = in_ax.data;
+    p.keep = in_ax.keep;
+    p.strb = in_ax.strb;
+    p.user = in_ax.user;
+    p.last = in_ax.last;
+    p.id   = in_ax.id;
+    p.dest = in_ax.dest;
+
+    dst << p;
+}
+
+// ----------------------------------------------------------------------
 // Helper: simple mask-and operation (color & edge mask)
 // ----------------------------------------------------------------------
 static void bitwise_and_mask(pixel_stream &color, pixel_stream &mask, pixel_stream &dst) {
@@ -29,19 +50,57 @@ static void bitwise_and_mask(pixel_stream &color, pixel_stream &mask, pixel_stre
     if (mask_val > 0) {
         p_out.data = p_color.data;
     } else {
-        p_out.data = 0;
+        // Zero RGB but keep MSB/alpha metadata from the color stream
+        p_out.data = (p_color.data & 0xFF000000);
     }
 
     dst << p_out;
 }
 
+// ----------------------------------------------------------------------
+// Helper: internal pixel stream -> AXI stream (one pixel per call)
+// ----------------------------------------------------------------------
+static void pixel_to_axis(pixel_stream &src, axis_stream &d_axis) {
+    #pragma HLS INLINE off
+    #pragma HLS PIPELINE II=1
+    pixel_data p;
+    src >> p;
+
+    axis_pixel out_ax;
+    out_ax.data = p.data;
+    out_ax.keep = p.keep;
+    out_ax.strb = p.strb;
+    out_ax.user = p.user;
+    out_ax.last = p.last;
+    out_ax.id   = p.id;
+    out_ax.dest = p.dest;
+
+    d_axis << out_ax;
+}
+
+// ----------------------------------------------------------------------
+// Public helper: simple pass-through stage (one pixel per call)
+// ----------------------------------------------------------------------
+void pixel_passthrough(pixel_stream &src, pixel_stream &dst) {
+    #pragma HLS INLINE off
+    #pragma HLS PIPELINE II=1
+    pixel_data p;
+    src >> p;
+    dst << p;
+}
 
 // Full cartoonize pipeline: bilateral filter + adaptive threshold + mask composite
-void cartoonize_pipeline(pixel_stream &src, pixel_stream &dst) {
+void cartoonize_pipeline(axis_stream &src, axis_stream &dst) {
     #pragma HLS INTERFACE axis port=src
     #pragma HLS INTERFACE axis port=dst
     #pragma HLS INTERFACE ap_ctrl_none port=return
-    #pragma HLS DATAFLOW
+    #pragma HLS DATAFLOW disable_start_propagation // Always processing frames, remove control gating that limits throughput
+
+    pixel_stream in_pix("in_pix");
+    pixel_stream out_pix("out_pix");
+    #pragma HLS STREAM variable=in_pix depth=64
+    #pragma HLS STREAM variable=out_pix depth=64
+
 
     pixel_stream raw_to_bilateral("raw_to_bilateral");
     pixel_stream raw_to_gray("raw_to_gray");
@@ -57,16 +116,25 @@ void cartoonize_pipeline(pixel_stream &src, pixel_stream &dst) {
     #pragma HLS STREAM variable=median_stream depth=64
     #pragma HLS STREAM variable=mask_stream depth=64
 
-    duplicate_stream(src, raw_to_bilateral, raw_to_gray);
+    axis_to_pixel(src, in_pix);
+
+    duplicate_stream(in_pix, raw_to_bilateral, raw_to_gray);
     bilateral_filter(raw_to_bilateral, color_stream);
     grayscale(raw_to_gray, gray_stream);
     median_blur(gray_stream, median_stream);
     adaptive_threshold(median_stream, mask_stream);
-    bitwise_and_mask(color_stream, mask_stream, dst);
+    bitwise_and_mask(color_stream, mask_stream, out_pix);
+
+    pixel_to_axis(out_pix, dst);
 }
 
 // Stream() function for streamulator testbench
 void stream(pixel_stream &src, pixel_stream &dst, int frame) {
     (void)frame;
-    cartoonize_pipeline(src, dst);
+    axis_stream axis_src("axis_src");
+    axis_stream axis_dst("axis_dst");
+    
+    pixel_to_axis(src, axis_src);
+    cartoonize_pipeline(axis_src, axis_dst);
+    axis_to_pixel(axis_dst, dst);
 }

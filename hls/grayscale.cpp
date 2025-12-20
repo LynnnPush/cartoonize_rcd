@@ -31,18 +31,13 @@ void grayscale(pixel_stream &src, pixel_stream &dst)
     uint8_t gray_clamped = (gray_val > 255) ? 255 : (uint8_t)gray_val;
 
     // 3. Output Write
-    pixel_data p_out;
+    pixel_data p_out = p_in; // Copy metadata (user/last)
 
     // Replicate the grayscale value across R, G, and B channels.
-    p_out.data = r2rgba(gray_clamped) | 
-                 g2rgba(gray_clamped) | 
-                 b2rgba(gray_clamped); 
-
-    // Pass through control signals (Side-channels)
-    p_out.user = p_in.user;
-    p_out.last = p_in.last;
-    p_out.keep = p_in.keep;
-    p_out.strb = p_in.strb;
+    p_out.data = r2rgba(gray_clamped) |
+                 g2rgba(gray_clamped) |
+                 b2rgba(gray_clamped) |
+                 (p_in.data & 0xFF000000); // preserve MSB/alpha
 
     // Write to output stream
     dst << p_out;
