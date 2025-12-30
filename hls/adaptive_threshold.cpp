@@ -88,15 +88,52 @@ void adaptive_threshold(pixel_stream &src, pixel_stream &dst)
             col_bank[r] = line_buffer[r][x];
         }
 
+        // Fill window with edge replication for top border - using MUX instead of variable loop
         for (int i = 0; i < K_SIZE - 1; i++) {
             #pragma HLS UNROLL
             int idx = line_idx + i;
             if (idx >= (K_SIZE - 1)) idx -= (K_SIZE - 1);
-            window_buffer[i][K_SIZE - 1] = col_bank[idx];
+            
+            // Check if this window row corresponds to a row that exists
+            int src_row = (int)y - (K_SIZE - 1) + i;
+            
+            // Use ternary/conditional for MUX-based selection (HLS-friendly)
+            uint8_t selected_pixel;
+            if (src_row < 0) {
+                // Row doesn't exist - replicate edge
+                selected_pixel = (y == 0) ? new_pixel : col_bank[0];
+            } else {
+                // Normal case - row exists in buffer
+                selected_pixel = col_bank[idx];
+            }
+            window_buffer[i][K_SIZE - 1] = selected_pixel;
         }
 
         window_buffer[K_SIZE - 1][K_SIZE - 1] = new_pixel;
         line_buffer[line_idx][x] = new_pixel;
+    }
+
+    // Edge Replication for Left Border (HLS-friendly: fixed loop bounds with MUX)
+    // Pre-calculate edge values for each row
+    uint8_t edge_vals[K_SIZE];
+    #pragma HLS ARRAY_PARTITION variable=edge_vals complete dim=0
+    for (int i = 0; i < K_SIZE; i++) {
+        #pragma HLS UNROLL
+        edge_vals[i] = window_buffer[i][K_SIZE - 1];
+    }
+    
+    // Use fixed loop bounds with conditional assignment (MUX-based)
+    for (int i = 0; i < K_SIZE; i++) {
+        #pragma HLS UNROLL
+        for (int j = 0; j < K_SIZE - 1; j++) {
+            #pragma HLS UNROLL
+            // Condition: j < (K_SIZE - 1 - x) means this column needs edge replication
+            // Rewritten as: x < (K_SIZE - 1 - j) for fixed comparison
+            if ((int)x < (K_SIZE - 1 - j)) {
+                window_buffer[i][j] = edge_vals[i];
+            }
+            // else: keep the shifted value (already in place)
+        }
     }
 
     // ----------------------------------------------------------------------
@@ -128,54 +165,38 @@ void adaptive_threshold(pixel_stream &src, pixel_stream &dst)
     col_sums_buffer[K_SIZE - 1] = new_col_sum;
 
     // ----------------------------------------------------------------------
-    // 5. THRESHOLD LOGIC
+    // 5. THRESHOLD - ALWAYS process (no guard condition!)
     // ----------------------------------------------------------------------
     
-    pixel_data p_out = p_in; // Copy metadata (user, last, etc)
-    uint8_t result_pixel = 0;
+    pixel_data p_out = p_in;
+    uint8_t result_pixel;
 
-    // Logic valid only after buffer is primed (y >= K-1 and x >= K-1)
-    // Note: HLS latency means we process data continuously, but valid output
-    // logically corresponds to the center pixel [pad, pad].
+    // Calculate mean
+    uint8_t local_mean = current_window_sum / K_AREA;
+
+    // Get center pixel
+    uint8_t center_pixel = window_buffer[K_PAD][K_PAD];
+
+    // Calculate threshold with C offset
+    int threshold_val = (int)local_mean - C_CONST;
     
-    if (y >= K_SIZE - 1 && x >= K_SIZE - 1) {
-        
-        // 1. Calculate Mean (Integer division)
-        //    For K=7, Area=49. 
-        uint8_t local_mean = current_window_sum / K_AREA;
-
-        // 2. Get Center Pixel
-        uint8_t center_pixel = window_buffer[K_PAD][K_PAD];
-
-        // 3. Calculate Threshold (Handling underflow for uint)
-        int threshold_val = (int)local_mean - C_CONST;
-        
-        // 4. Binarize
-        if ((int)center_pixel > threshold_val) {
-            result_pixel = MAX_VAL;
-        } else {
-            result_pixel = 0;
-        }
-    } else {
-        // Keep mask open during warm-up so borders don't get forced to black
+    // Binarize
+    if ((int)center_pixel > threshold_val) {
         result_pixel = MAX_VAL;
+    } else {
+        result_pixel = 0;
     }
 
-    // Pack Result (Replicate to RGB for display consistency) and preserve MSB/alpha
+    // Pack output
     p_out.data = r2rgba(result_pixel) | g2rgba(result_pixel) | b2rgba(result_pixel) |
                  (p_in.data & 0xFF000000);
     
-    // Write to Output
     dst << p_out;
 
-    // ----------------------------------------------------------------------
-    // 6. COORDINATE UPDATES
-    // ----------------------------------------------------------------------
-    
+    // Update counters
     if (p_in.last) {
         x = 0;
         y++;
-        // Move circular buffer index
         line_idx++;
         if (line_idx >= (K_SIZE - 1)) line_idx = 0;
     } else {

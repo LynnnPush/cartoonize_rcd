@@ -90,7 +90,7 @@ void pixel_passthrough(pixel_stream &src, pixel_stream &dst) {
 }
 
 // Full cartoonize pipeline: bilateral filter + adaptive threshold + mask composite
-void cartoonize_pipeline(axis_stream &src, axis_stream &dst) {
+void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst) {
     #pragma HLS INTERFACE axis port=src
     #pragma HLS INTERFACE axis port=dst
     #pragma HLS INTERFACE ap_ctrl_none port=return
@@ -135,6 +135,6 @@ void stream(pixel_stream &src, pixel_stream &dst, int frame) {
     axis_stream axis_dst("axis_dst");
     
     pixel_to_axis(src, axis_src);
-    cartoonize_pipeline(axis_src, axis_dst);
+    cartoonize_pipeline_v2(axis_src, axis_dst);
     axis_to_pixel(axis_dst, dst);
 }

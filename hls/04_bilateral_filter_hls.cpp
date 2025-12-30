@@ -91,7 +91,7 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
         }
     }
 
-    // Fill Rightmost Column (Update)
+    // Fill Rightmost Column (Update) with Edge Replication for Top Border
     if (x < WIDTH) {
         // 1) Read each bank with a constant index (HLS can map banks to RAM cleanly)
         rgb_pixel col_bank[D - 1];
@@ -102,11 +102,25 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
         }
 
         // 2) Rotate into the window using line_idx (rotation happens in regs now)
+        //    WITH edge replication for top border - using MUX instead of variable loop
         for (int i = 0; i < D - 1; i++) {
             #pragma HLS UNROLL
             int idx = line_idx + i;
             if (idx >= (D - 1)) idx -= (D - 1);   // cheap wrap instead of %
-            window_buffer[i][D - 1] = col_bank[idx];
+            
+            // Calculate which actual image row this window position corresponds to
+            int src_row = (int)y - (D - 1) + i;
+            
+            // Use ternary operators (MUX) instead of nested if-else for better pipelining
+            rgb_pixel selected_pixel;
+            if (src_row < 0) {
+                // This row doesn't exist yet - replicate edge
+                selected_pixel = (y == 0) ? new_pixel : col_bank[0];
+            } else {
+                // Row exists - use it normally
+                selected_pixel = col_bank[idx];
+            }
+            window_buffer[i][D - 1] = selected_pixel;
         }
 
         // 3) Bottom pixel is current input
@@ -117,75 +131,97 @@ void bilateral_filter(pixel_stream &src, pixel_stream &dst)
     }
 
     // ----------------------------------------------------------------------
+    // 3b. EDGE REPLICATION FOR LEFT BORDER (HLS-friendly: fixed loop bounds with MUX)
+    // ----------------------------------------------------------------------
+    // Pre-calculate edge values for each row
+    rgb_pixel edge_vals[D];
+    #pragma HLS ARRAY_PARTITION variable=edge_vals complete dim=0
+    for (int i = 0; i < D; i++) {
+        #pragma HLS UNROLL
+        edge_vals[i] = window_buffer[i][D - 1];
+    }
+    
+    // Use fixed loop bounds with conditional assignment (MUX-based)
+    for (int i = 0; i < D; i++) {
+        #pragma HLS UNROLL
+        for (int j = 0; j < D - 1; j++) {
+            #pragma HLS UNROLL
+            // Condition: j < (D - 1 - x) means this column needs edge replication
+            // Rewritten as: x < (D - 1 - j) for fixed comparison
+            if ((int)x < (D - 1 - j)) {
+                window_buffer[i][j] = edge_vals[i];
+            }
+            // else: keep the shifted value (already in place)
+        }
+    }
+
+    // ----------------------------------------------------------------------
     // 4. BILATERAL FILTER CORE LOGIC
     // ----------------------------------------------------------------------
     pixel_data p_out = p_in; 
-    rgb_pixel result_pixel = new_pixel; // default to pass-through while window warms up
+    rgb_pixel result_pixel;
 
-    // Output valid only after window is filled (D-1 in y and D-1 in x)
-    if (y >= D - 1 && x >= D - 1) {
+    // Window is now always valid due to edge replication - process unconditionally
+    rgb_pixel center_px = window_buffer[BF_PAD][BF_PAD];
+
+    // Process R, G, B channels independently
+    for (int c = 0; c < 3; c++) {
+        #pragma HLS UNROLL // Process all 3 channels in parallel
         
-        rgb_pixel center_px = window_buffer[BF_PAD][BF_PAD];
+        wsum_t w_sum = 0;
+        vsum_t val_sum = 0;
 
-        // Process R, G, B channels independently
-        for (int c = 0; c < 3; c++) {
-            #pragma HLS UNROLL // Process all 3 channels in parallel
-            
-            wsum_t w_sum = 0;
-            vsum_t val_sum = 0;
+        uint8_t center_val = center_px.val[c];
 
-            uint8_t center_val = center_px.val[c];
-
-            // Convolve over the 5x5 window (Fully Unrolled 25 taps in parallel)
-            for (int i = 0; i < D; i++) {
+        // Convolve over the 5x5 window (Fully Unrolled 25 taps in parallel)
+        for (int i = 0; i < D; i++) {
+            #pragma HLS UNROLL
+            for (int j = 0; j < D; j++) {
                 #pragma HLS UNROLL
-                for (int j = 0; j < D; j++) {
-                    #pragma HLS UNROLL
-                    
-                    uint8_t neighbor_val = window_buffer[i][j].val[c];
-                    
-                    // 1. Calculate Absolute Intensity Difference (0 to 255)
-                    int diff_int = (int)neighbor_val - (int)center_val;
-                    // Optimized absolute value for HLS
-                    int diff_abs = (diff_int ^ (diff_int >> 31)) - (diff_int >> 31);
-                    
-                    // 2. Look up Weights (from on-chip ROMs)
-                    weight_t w_s = SPATIAL_KERNEL_FX[i][j];
-                    weight_t w_c = COLOR_LUT_FX[diff_abs];
-                    weight_t w = w_s * w_c;  
-                    
-                    // TEST: Replace w_s with 1.0 as currently all elements in SPATIAL_KERNEL_FX are ~1.0              
-                    // weight_t w = w_c;
+                
+                uint8_t neighbor_val = window_buffer[i][j].val[c];
+                
+                // 1. Calculate Absolute Intensity Difference (0 to 255)
+                int diff_int = (int)neighbor_val - (int)center_val;
+                // Optimized absolute value for HLS
+                int diff_abs = (diff_int ^ (diff_int >> 31)) - (diff_int >> 31);
+                
+                // 2. Look up Weights (from on-chip ROMs)
+                weight_t w_s = SPATIAL_KERNEL_FX[i][j];
+                weight_t w_c = COLOR_LUT_FX[diff_abs];
+                weight_t w = w_s * w_c;  
+                
+                // TEST: Replace w_s with 1.0 as currently all elements in SPATIAL_KERNEL_FX are ~1.0              
+                // weight_t w = w_c;
 
-                    // 3. Accumulate
-                    w_sum   += w;
-                    val_sum += w * neighbor_val;
-                }
+                // 3. Accumulate
+                w_sum   += w;
+                val_sum += w * neighbor_val;
             }
-
-            // 4. Normalize (reciprocal LUT + multiply)
-            // Quantize w_sum to LUT index
-            wsum_t w_sum_rounded = w_sum + wsum_t(0.5);
-            ap_uint<8> recip_idx = w_sum_rounded.to_uint();
-            if (recip_idx == 0) recip_idx = 1;
-            if (recip_idx > 31) recip_idx = 31;
-            recip_idx -= 1;
-
-
-            // Lookup reciprocal
-            recip_t inv_w = RECIP_LUT[recip_idx];
-
-            // Normalize
-            ap_ufixed<32,16> norm = val_sum * inv_w;
-
-            // Clamp and assign
-            if (norm > 255)
-                result_pixel.val[c] = 255;
-            else
-                result_pixel.val[c] = (uint8_t)norm;
-
-
         }
+
+        // 4. Normalize (reciprocal LUT + multiply)
+        // Quantize w_sum to LUT index
+        wsum_t w_sum_rounded = w_sum + wsum_t(0.5);
+        ap_uint<8> recip_idx = w_sum_rounded.to_uint();
+        if (recip_idx == 0) recip_idx = 1;
+        if (recip_idx > 31) recip_idx = 31;
+        recip_idx -= 1;
+
+
+        // Lookup reciprocal
+        recip_t inv_w = RECIP_LUT[recip_idx];
+
+        // Normalize
+        ap_ufixed<32,16> norm = val_sum * inv_w;
+
+        // Clamp and assign
+        if (norm > 255)
+            result_pixel.val[c] = 255;
+        else
+            result_pixel.val[c] = (uint8_t)norm;
+
+
     }
 
     // ----------------------------------------------------------------------

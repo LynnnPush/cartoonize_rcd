@@ -1,0 +1,717 @@
+/* Demo: https://gemini.google.com/share/bcab4358ec2e */
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HLS Median Blur Visualization + AI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background-color: #121212;
+            color: #e0e0e0;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1e1e1e; }
+        ::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+        .panel {
+            background-color: #1e1e1e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        .cell {
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            user-select: none;
+        }
+
+        /* Animations */
+        @keyframes pulse-write {
+            0% { transform: scale(1); box-shadow: 0 0 0 rgba(76, 175, 80, 0); }
+            50% { transform: scale(1.1); box-shadow: 0 0 10px rgba(76, 175, 80, 0.5); }
+            100% { transform: scale(1); box-shadow: 0 0 0 rgba(76, 175, 80, 0); }
+        }
+        
+        @keyframes pulse-read {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); border-color: #2196F3; }
+            100% { transform: scale(1); }
+        }
+
+        .anim-write { animation: pulse-write 0.3s ease-in-out; }
+        .anim-read { animation: pulse-read 0.3s ease-in-out; }
+        
+        /* AI Loading Animation */
+        .typing-dot {
+            animation: typing 1.4s infinite ease-in-out both;
+            height: 6px; width: 6px; background-color: #4ade80; border-radius: 50%; display: inline-block; margin: 0 2px;
+        }
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+
+        /* Markdown Styles for AI Output */
+        .prose p { margin-bottom: 0.5em; font-size: 0.9rem; line-height: 1.4; }
+        .prose strong { color: #a7f3d0; font-weight: bold; }
+        .prose code { background: #333; padding: 2px 4px; border-radius: 3px; font-size: 0.8em; color: #fbbf24; }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden relative">
+
+    <!-- Header -->
+    <header class="bg-gray-900 border-b border-gray-800 p-4 flex justify-between items-center shrink-0 z-20">
+        <div>
+            <h1 class="text-xl font-bold text-green-400 flex items-center gap-2">
+                HLS Median Blur Mapper
+                <span class="text-xs font-normal text-gray-500 border border-gray-700 px-2 py-0.5 rounded">AI Powered ✨</span>
+            </h1>
+            <p class="text-xs text-gray-500 mt-1">Simulating 5x5 Window, Cyclic Line Buffer (K-1), and Median Sort</p>
+        </div>
+        <div class="flex gap-4 items-center">
+            
+            <!-- Toggle Mode -->
+            <button onclick="sim.toggleBorderMode()" id="btnBorderMode" class="bg-purple-700 hover:bg-purple-600 text-white px-3 py-2 rounded text-xs font-bold transition-colors border border-purple-500">
+                Mode: Border Replicate
+            </button>
+
+            <div class="h-8 w-px bg-gray-700 mx-2"></div>
+
+            <div class="bg-black px-4 py-2 rounded border border-gray-700 font-mono text-sm hidden md:block">
+                <span class="text-gray-400">Coords:</span> <span id="coordDisplay" class="text-yellow-400">(-1, -1)</span> |
+                <span class="text-gray-400">LineBuf Index:</span> <span id="cntDisplay" class="text-blue-400">0</span>
+            </div>
+            
+            <button onclick="sim.reset()" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm transition-colors" title="Generate new image and restart">New Image</button>
+            
+            <button onclick="sim.stepBack()" id="btnBack" class="bg-orange-700 hover:bg-orange-600 text-white px-4 py-2 rounded font-bold text-sm shadow-lg transition-colors flex items-center gap-2">
+                <span class="text-lg">←</span> Last
+            </button>
+
+            <button onclick="sim.step()" id="btnStep" class="bg-green-600 hover:bg-green-500 text-white px-6 py-2 rounded font-bold text-sm shadow-lg transition-colors flex items-center gap-2">
+                Next <span class="text-lg">→</span>
+            </button>
+            <button onclick="sim.play()" id="btnPlay" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm transition-colors">Play</button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex gap-4 p-4 overflow-hidden relative z-10 pb-48">
+        
+        <!-- COLUMN 1: Input & Line Buffer -->
+        <div class="flex-1 flex flex-col gap-4 min-w-[300px]">
+            <div class="panel p-4 flex-1 flex flex-col relative group">
+                <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
+                    <h2 class="text-sm font-bold text-gray-400 uppercase tracking-wider">1. Input Stream & RAM</h2>
+                </div>
+                
+                <!-- Input Pixel -->
+                <div class="flex flex-col items-center mb-6">
+                    <span class="text-xs text-gray-500 mb-1">Stream Input (src)</span>
+                    <div id="inputPixel" class="w-12 h-12 bg-black border-2 border-green-500 rounded flex items-center justify-center text-lg font-bold shadow-[0_0_15px_rgba(76,175,80,0.3)]">
+                        -
+                    </div>
+                </div>
+
+                <!-- Line Buffer Visualization -->
+                <div class="flex-1 overflow-auto">
+                    <div class="flex justify-between items-end mb-2">
+                        <span class="text-xs text-gray-500">Line Buffer (RAM_2P)</span>
+                        <span class="text-[10px] text-gray-600">Cyclic Write</span>
+                    </div>
+                    
+                    <div id="lineBufferGrid" class="grid gap-1 bg-black p-2 rounded border border-gray-800" style="grid-template-columns: 20px repeat(12, 1fr);">
+                        <!-- JS fills this -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- COLUMN 2: Window Buffer -->
+        <div class="flex-none w-[380px] flex flex-col">
+            <div class="panel p-4 h-full flex flex-col relative overflow-hidden">
+                <!-- Data Flow Arrows SVG Overlay -->
+                <svg class="absolute top-0 left-0 w-full h-full pointer-events-none opacity-20" style="z-index: 0;">
+                    <path d="M 50 100 Q 150 100 190 200" fill="none" stroke="white" stroke-width="2" stroke-dasharray="5,5"/>
+                </svg>
+
+                <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-2 relative z-10">
+                    <h2 class="text-sm font-bold text-gray-400 uppercase tracking-wider">2. Window (Reg 5x5)</h2>
+                    <button onclick="askGeminiHardware()" class="flex items-center gap-1 bg-purple-900/50 hover:bg-purple-800 text-purple-200 border border-purple-500/30 px-2 py-1 rounded text-xs transition-all">
+                        <span>Explain Logic</span> <span>✨</span>
+                    </button>
+                </div>
+
+                <div class="flex flex-col items-center justify-center flex-1 relative z-10">
+                    <div class="mb-2 text-xs text-gray-500 w-full text-center">Shift Left &larr; | Insert Right &darr;</div>
+                    
+                    <div id="windowGrid" class="grid grid-cols-5 gap-1 bg-gray-900 p-2 rounded border-2 border-gray-700 shadow-xl">
+                        <!-- JS fills this -->
+                    </div>
+
+                    <div class="mt-6 space-y-2 text-xs w-full">
+                        <div class="bg-gray-800/80 p-2 rounded border-l-2 border-purple-500">
+                            <span class="font-bold text-gray-300">Logic Step 1:</span> Shift cols 0-3 left.
+                        </div>
+                        <div class="bg-gray-800/80 p-2 rounded border-l-2 border-blue-500">
+                            <span class="font-bold text-gray-300">Logic Step 2:</span> Read Line Buffer [0..3][x].
+                        </div>
+                        <div class="bg-gray-800/80 p-2 rounded border-l-2 border-yellow-500">
+                            <span class="font-bold text-gray-300">Logic Step 3:</span> Handle Border Replication.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- COLUMN 3: Output Frame -->
+        <div class="flex-1 flex flex-col gap-4 min-w-[300px]">
+            <div class="panel p-4 flex-1 flex flex-col">
+                <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
+                    <h2 class="text-sm font-bold text-gray-400 uppercase tracking-wider">3. Output Frame</h2>
+                    <button onclick="askGeminiImage()" class="flex items-center gap-1 bg-yellow-900/50 hover:bg-yellow-800 text-yellow-200 border border-yellow-500/30 px-2 py-1 rounded text-xs transition-all">
+                        <span>Analyze Patch</span> <span>✨</span>
+                    </button>
+                </div>
+
+                <!-- Output Frame Visualization -->
+                <div class="flex-1 flex flex-col overflow-auto">
+                    <!-- Current Output Pixel (Large) -->
+                    <div class="flex flex-col items-center mb-6">
+                        <span class="text-xs text-gray-500 mb-1">Stream Output (dst)</span>
+                        <div id="outputPixel" class="w-12 h-12 bg-black border-4 border-yellow-500 rounded flex items-center justify-center text-lg font-bold shadow-[0_0_20px_rgba(255,193,7,0.2)]">
+                            ?
+                        </div>
+                        <div class="mt-1 text-[10px] text-gray-400" id="outputValText">Val: -</div>
+                    </div>
+
+                    <!-- Output Grid -->
+                    <div class="flex-1">
+                        <div class="flex justify-between items-end mb-2">
+                            <span class="text-xs text-gray-500">Frame Buffer (Reconstructed)</span>
+                        </div>
+                        <div id="outputGrid" class="grid gap-1 bg-black p-2 rounded border border-gray-800" style="grid-template-columns: repeat(12, 1fr);">
+                            <!-- JS fills this -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- AI Insights Panel (Bottom Sheet) -->
+    <div id="aiPanel" class="fixed bottom-0 left-0 right-0 bg-gray-900/95 backdrop-blur-md border-t border-gray-700 transform translate-y-full transition-transform duration-300 z-50 h-64 flex flex-col shadow-2xl">
+        <!-- Handle/Header -->
+        <div class="flex justify-between items-center px-4 py-2 border-b border-gray-700 bg-gray-900">
+            <div class="flex items-center gap-2">
+                <span class="text-lg">✨</span>
+                <span class="font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-green-400">Gemini Insights</span>
+            </div>
+            <button onclick="closeAI()" class="text-gray-500 hover:text-white p-1 hover:bg-gray-800 rounded">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+            </button>
+        </div>
+        
+        <!-- Content Area -->
+        <div id="aiContent" class="p-6 overflow-y-auto prose prose-invert max-w-none text-gray-300">
+            <!-- AI Response Injected Here -->
+        </div>
+
+        <!-- Loading State -->
+        <div id="aiLoading" class="hidden absolute inset-0 bg-gray-900/90 flex flex-col items-center justify-center z-10">
+            <div class="flex space-x-1 mb-2">
+                <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+            </div>
+            <span class="text-xs text-green-400 font-mono animate-pulse">Consulting Gemini...</span>
+        </div>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const apiKey = ""; // System provided at runtime
+        const WIDTH = 12; // Simulation width
+        const HEIGHT = 8;
+        const K_SIZE = 5;
+
+        // --- Simulator Logic ---
+        class Simulator {
+            constructor() {
+                this.borderMode = true; // Default: true = Replicate, false = No borders (zero pad)
+                this.reset(false); // Initial hard reset
+            }
+
+            toggleBorderMode() {
+                this.borderMode = !this.borderMode;
+                const btn = document.getElementById('btnBorderMode');
+                
+                if (this.borderMode) {
+                    btn.innerText = "Mode: Border Replicate";
+                    btn.className = "bg-purple-700 hover:bg-purple-600 text-white px-3 py-2 rounded text-xs font-bold transition-colors border border-purple-500";
+                } else {
+                    btn.innerText = "Mode: No Borders";
+                    btn.className = "bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded text-xs font-bold transition-colors border border-gray-500 opacity-80";
+                }
+                
+                // Restart simulation to show effect clearly
+                this.reset(true); // Keep image, just reset sim
+            }
+
+            // reset(true) = soft reset (keep image, rewind to start)
+            // reset(false) = hard reset (new image)
+            reset(keepImage = false) {
+                this.x = 0;
+                this.y = 0;
+                this.cnt = 0; // Cyclic buffer index
+                this.stepCount = 0; // Track total steps for rewinding
+                this.isPlaying = false;
+                
+                // Initialize Memory
+                // Line Buffer: (K-1) rows x WIDTH cols
+                this.lineBuffer = Array.from({ length: K_SIZE - 1 }, () => Array(WIDTH).fill(0));
+                
+                // Window Buffer: KxK
+                this.windowBuffer = Array.from({ length: K_SIZE }, () => Array(K_SIZE).fill(0));
+                
+                // Output Buffer for Grid Display
+                this.outputData = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(null));
+
+                // Last computed median
+                this.lastMedian = 0;
+
+                // Generate or Keep Image Frame
+                if (!keepImage || !this.inputData) {
+                    this.inputData = [];
+                    for(let y=0; y<HEIGHT; y++) {
+                        let row = [];
+                        for(let x=0; x<WIDTH; x++) {
+                            // Generate gradient
+                            let val = Math.floor((x / WIDTH) * 200 + (y / HEIGHT) * 50);
+                            // Add noise
+                            if (Math.random() > 0.95) val = 255;
+                            if (Math.random() > 0.05 && Math.random() < 0.1) val = 0;
+                            row.push(Math.max(0, Math.min(255, val)));
+                        }
+                        this.inputData.push(row);
+                    }
+                }
+
+                // Clear UI
+                this.renderInit();
+                this.updateUI();
+            }
+
+            renderInit() {
+                // Init Line Buffer Grid
+                const lbGrid = document.getElementById('lineBufferGrid');
+                lbGrid.innerHTML = '';
+                // Create headers
+                lbGrid.innerHTML += `<div class="text-[10px] text-gray-600 text-right pr-1">#</div>`;
+                for(let c=0; c<WIDTH; c++) lbGrid.innerHTML += `<div class="text-[10px] text-gray-600 text-center">${c}</div>`;
+                
+                // Create rows
+                for(let r=0; r<K_SIZE-1; r++) {
+                    lbGrid.innerHTML += `<div id="lb-row-label-${r}" class="text-[10px] text-gray-500 flex items-center justify-end pr-1 font-mono">R${r}</div>`;
+                    for(let c=0; c<WIDTH; c++) {
+                        const cell = document.createElement('div');
+                        cell.id = `lb-${r}-${c}`;
+                        cell.className = 'w-6 h-6 bg-gray-800 rounded-sm text-[10px] flex items-center justify-center text-gray-500';
+                        cell.innerText = '0';
+                        lbGrid.appendChild(cell);
+                    }
+                }
+
+                // Init Window Grid
+                const wGrid = document.getElementById('windowGrid');
+                wGrid.innerHTML = '';
+                for(let r=0; r<K_SIZE; r++) {
+                    for(let c=0; c<K_SIZE; c++) {
+                        const cell = document.createElement('div');
+                        cell.id = `win-${r}-${c}`;
+                        cell.className = 'w-12 h-12 bg-black border border-gray-700 flex items-center justify-center text-sm font-bold shadow-inner';
+                        cell.innerText = '0';
+                        wGrid.appendChild(cell);
+                    }
+                }
+
+                // Init Output Grid
+                const outGrid = document.getElementById('outputGrid');
+                outGrid.innerHTML = '';
+                for(let r=0; r<HEIGHT; r++) {
+                    for(let c=0; c<WIDTH; c++) {
+                        const cell = document.createElement('div');
+                        cell.id = `out-${r}-${c}`;
+                        // Default empty style
+                        cell.className = 'w-6 h-6 bg-gray-900 rounded-sm border border-gray-800 flex items-center justify-center text-[8px] text-gray-600';
+                        cell.innerText = '.';
+                        outGrid.appendChild(cell);
+                    }
+                }
+            }
+
+            play() {
+                if (this.isPlaying) {
+                    this.isPlaying = false;
+                    document.getElementById('btnPlay').innerText = "Play";
+                    return;
+                }
+                this.isPlaying = true;
+                document.getElementById('btnPlay').innerText = "Pause";
+                const loop = () => {
+                    if (!this.isPlaying) return;
+                    this.step();
+                    setTimeout(loop, 200); // 200ms delay per step
+                };
+                loop();
+            }
+
+            stepBack() {
+                if (this.stepCount <= 0) return;
+                
+                // Pause if playing
+                if (this.isPlaying) {
+                    this.isPlaying = false;
+                    document.getElementById('btnPlay').innerText = "Play";
+                }
+
+                const targetStep = this.stepCount - 1;
+                
+                // Soft reset (rewind to 0, keep same image data)
+                this.reset(true); 
+
+                // Edge case: if returning to start
+                if (targetStep === 0) {
+                    return; // UI already reset to 0 by reset()
+                }
+
+                // Fast forward to Just Before Target
+                for(let i = 0; i < targetStep - 1; i++) {
+                    this.step(false); // false = skip UI updates
+                }
+
+                // Execute final step WITH UI update
+                this.step(true);
+            }
+
+            step(doUpdateUI = true) {
+                if (this.y >= HEIGHT) {
+                    this.isPlaying = false;
+                    document.getElementById('btnPlay').innerText = "Play";
+                    return;
+                }
+
+                // 1. Get Input (Deterministic from pre-gen array)
+                const newPixel = this.inputData[this.y][this.x];
+                
+                // --- EXECUTE HLS LOGIC (Ported from C++) ---
+                
+                // Step A: Shift Window Left
+                for(let i=0; i<K_SIZE; i++) {
+                    for(let j=0; j<K_SIZE-1; j++) {
+                        this.windowBuffer[i][j] = this.windowBuffer[i][j+1];
+                    }
+                }
+
+                // Step B: Fill Right Column & Update Line Buffer
+                let colBank = new Array(K_SIZE-1).fill(0);
+                
+                if (this.x < WIDTH) {
+                    // Read from Line Buffer
+                    for(let r=0; r<K_SIZE-1; r++) {
+                        colBank[r] = this.lineBuffer[r][this.x];
+                    }
+
+                    // Fill window right column
+                    for(let i=0; i<K_SIZE-1; i++) {
+                        let idx = this.cnt + i;
+                        if (idx >= (K_SIZE-1)) idx -= (K_SIZE-1);
+
+                        // Calculate logic row
+                        let srcRow = this.y - (K_SIZE-1) + i;
+                        
+                        // Top Border Replication Logic (Conditional based on Mode)
+                        if (srcRow < 0) {
+                            if (this.borderMode) {
+                                // Replicate Mode: Use y=0 pixel or top row of buffer
+                                this.windowBuffer[i][K_SIZE-1] = (this.y === 0) ? newPixel : colBank[0]; 
+                            } else {
+                                // No Border Mode: Use 0 (Black)
+                                this.windowBuffer[i][K_SIZE-1] = 0;
+                            }
+                        } else {
+                            this.windowBuffer[i][K_SIZE-1] = colBank[idx];
+                        }
+                    }
+                    
+                    this.windowBuffer[K_SIZE-1][K_SIZE-1] = newPixel;
+                    
+                    // Write to Line Buffer
+                    this.lineBuffer[this.cnt][this.x] = newPixel;
+                }
+
+                // Step C: Left Border Replication
+                // Only execute if border mode is ON or we are past the edge region
+                
+                if (this.borderMode) {
+                    // Standard Logic: Overwrite shifted values with edge value
+                    let edgeVals = [];
+                    for(let i=0; i<K_SIZE; i++) edgeVals.push(this.windowBuffer[i][K_SIZE-1]);
+
+                    for(let i=0; i<K_SIZE; i++) {
+                        for(let j=0; j<K_SIZE-1; j++) {
+                            if (this.x < (K_SIZE - 1 - j)) {
+                                this.windowBuffer[i][j] = edgeVals[i];
+                            }
+                        }
+                    }
+                } 
+                // If borderMode is FALSE, we simply skip Step C. 
+                // The window will naturally contain shifted 0s (from init) or previous data until valid pixels arrive.
+
+                // Step D: Sort & Median
+                let flatWindow = this.windowBuffer.flat();
+                let sortedWindow = [...flatWindow].sort((a, b) => a - b);
+                let median = sortedWindow[12]; // Index 12 is middle of 25
+                this.lastMedian = median;
+
+                // Capture output to Frame Buffer
+                this.outputData[this.y][this.x] = median;
+
+                this.stepCount++;
+
+                // --- Update UI ---
+                if (doUpdateUI) {
+                    this.updateUI(newPixel, median);
+                }
+
+                // --- Advance Counters ---
+                if (this.x === WIDTH - 1) {
+                    this.x = 0;
+                    this.y++;
+                    this.cnt++;
+                    if (this.cnt >= (K_SIZE - 1)) this.cnt = 0;
+                } else {
+                    this.x++;
+                }
+            }
+
+            updateUI(newPixel, median) {
+                const x = this.x;
+                const cnt = this.cnt;
+
+                // Update Status
+                document.getElementById('coordDisplay').innerText = `(${this.x}, ${this.y})`;
+                document.getElementById('cntDisplay').innerText = `${this.cnt}`;
+                
+                // Update Input Pixel
+                const inEl = document.getElementById('inputPixel');
+                if (newPixel !== undefined) {
+                    inEl.innerText = newPixel;
+                    inEl.style.backgroundColor = `rgb(${newPixel}, ${newPixel}, ${newPixel})`;
+                    inEl.style.color = newPixel > 128 ? 'black' : 'white';
+                }
+
+                // Update Line Buffer Grid
+                for(let r=0; r<K_SIZE-1; r++) {
+                    const lbl = document.getElementById(`lb-row-label-${r}`);
+                    lbl.className = (r === cnt) ? 
+                        "text-[10px] text-green-400 font-bold flex items-center justify-end pr-1 font-mono transition-colors" : 
+                        "text-[10px] text-gray-600 flex items-center justify-end pr-1 font-mono transition-colors";
+
+                    for(let c=0; c<WIDTH; c++) {
+                        const cell = document.getElementById(`lb-${r}-${c}`);
+                        const val = this.lineBuffer[r][c];
+                        cell.innerText = val;
+                        
+                        let bg = `rgb(${Math.floor(val/2)}, ${Math.floor(val/2)}, ${Math.floor(val/2)})`; 
+                        let border = "1px solid #333";
+                        
+                        if (c === x && r === cnt && newPixel !== undefined) {
+                            bg = `rgb(${val}, ${val}, ${val})`;
+                            border = "2px solid #4CAF50";
+                        } else if (c === x && newPixel !== undefined) {
+                            border = "2px solid #2196F3";
+                        }
+
+                        cell.style.backgroundColor = bg;
+                        cell.style.border = border;
+                        cell.style.color = val > 128 ? '#000' : '#888';
+                    }
+                }
+
+                // Update Window Grid
+                for(let r=0; r<K_SIZE; r++) {
+                    for(let c=0; c<K_SIZE; c++) {
+                        const cell = document.getElementById(`win-${r}-${c}`);
+                        const val = this.windowBuffer[r][c];
+                        cell.innerText = val;
+                        cell.style.backgroundColor = `rgb(${val}, ${val}, ${val})`;
+                        cell.style.color = val > 128 ? 'black' : 'white';
+                        
+                        if (c === K_SIZE-1 && newPixel !== undefined) {
+                            cell.style.borderColor = '#4CAF50';
+                        } else {
+                            cell.style.borderColor = '#444';
+                        }
+                    }
+                }
+
+                // Update Output Grid
+                for(let r=0; r<HEIGHT; r++) {
+                    for(let c=0; c<WIDTH; c++) {
+                        const cell = document.getElementById(`out-${r}-${c}`);
+                        const val = this.outputData[r][c];
+                        
+                        if (val !== null) {
+                            // Render pixel
+                            cell.style.backgroundColor = `rgb(${val}, ${val}, ${val})`;
+                            cell.style.color = val > 128 ? 'black' : 'white';
+                            cell.innerText = val;
+                            
+                            // Highlight Current Write
+                            if (r === this.y && c === this.x) {
+                                cell.style.border = "2px solid #FFC107"; // Yellow
+                                cell.style.transform = "scale(1.1)";
+                                cell.style.zIndex = "10";
+                            } else {
+                                cell.style.border = "1px solid #333";
+                                cell.style.transform = "scale(1)";
+                                cell.style.zIndex = "1";
+                            }
+                        } else {
+                            // Empty/Pending
+                            cell.style.backgroundColor = "#111";
+                            cell.style.border = "1px solid #222";
+                            cell.innerText = ".";
+                            cell.style.color = "#333";
+                        }
+                    }
+                }
+
+                // Update Large Output Pixel Display
+                const outEl = document.getElementById('outputPixel');
+                outEl.innerText = median;
+                outEl.style.backgroundColor = `rgb(${median}, ${median}, ${median})`;
+                outEl.style.color = median > 128 ? 'black' : 'white';
+                document.getElementById('outputValText').innerText = `Val: ${median}`;
+            }
+        }
+
+        const sim = new Simulator();
+
+        // --- Gemini AI Integration ---
+
+        async function callGemini(prompt, systemContext = "") {
+            const loading = document.getElementById('aiLoading');
+            const content = document.getElementById('aiContent');
+            const panel = document.getElementById('aiPanel');
+            
+            // Show Panel & Loading
+            panel.classList.remove('translate-y-full');
+            loading.classList.remove('hidden');
+            content.innerHTML = ''; // Clear previous
+
+            try {
+                // Retry logic
+                let attempts = 0;
+                let responseData = null;
+                
+                while(attempts < 3) {
+                    try {
+                        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                contents: [{ parts: [{ text: prompt }] }],
+                                systemInstruction: { parts: [{ text: systemContext }] }
+                            })
+                        });
+                        
+                        if (!response.ok) throw new Error(response.statusText);
+                        responseData = await response.json();
+                        break;
+                    } catch (e) {
+                        attempts++;
+                        await new Promise(r => setTimeout(r, 1000 * attempts)); // Backoff
+                    }
+                }
+
+                if (!responseData) throw new Error("Failed to contact Gemini after retries.");
+
+                const rawText = responseData.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated.";
+                // Parse Markdown
+                content.innerHTML = marked.parse(rawText);
+
+            } catch (e) {
+                content.innerHTML = `<p class="text-red-400">Error: ${e.message}. Please check API Key or try again.</p>`;
+            } finally {
+                loading.classList.add('hidden');
+            }
+        }
+
+        function closeAI() {
+            document.getElementById('aiPanel').classList.add('translate-y-full');
+        }
+
+        // Feature 1: Explain HLS Hardware Logic
+        function askGeminiHardware() {
+            // Pause simulation for user focus
+            sim.isPlaying = false;
+            document.getElementById('btnPlay').innerText = "Play";
+
+            const context = `You are an expert in FPGA High-Level Synthesis (HLS).
+The user is running a simulation of a C++ HLS Median Filter (Window 5x5).
+Key Code Context:
+- Line Buffer: static uint8_t line_buffer[4][WIDTH] (Cyclic BRAM)
+- Window: static uint8_t window_buffer[5][5] (Registers)
+- Sorting: Odd-Even Batcher Sort (Sorting Network)
+
+Explain the current hardware state briefly. Mention if we are handling borders (replication) or standard sliding window operations.`;
+
+            const prompt = `Explain the hardware operations at this step:
+- Pixel Coordinate: (${sim.x}, ${sim.y})
+- Image Width: ${WIDTH}
+- Line Buffer Row Index (cnt): ${sim.cnt}
+- Is Border Region: ${sim.x < 5 || sim.y < 5 ? "YES (Replication Active)" : "NO (Steady State)"}
+
+Describe data movement between Line Buffer (BRAM) and Window (Registers). Keep it concise and technical.`;
+
+            callGemini(prompt, context);
+        }
+
+        // Feature 2: Analyze Image Patch
+        function askGeminiImage() {
+            // Pause
+            sim.isPlaying = false;
+            document.getElementById('btnPlay').innerText = "Play";
+
+            const context = `You are a Computer Vision expert. 
+Analyze the given 5x5 pixel window (grayscale 0-255).
+Explain if the patch represents Noise, an Edge, or a Flat region.
+Explain how the Median Filter (output) relates to the center pixel.`;
+
+            const prompt = `Analyze this 5x5 pixel patch:
+Matrix: ${JSON.stringify(sim.windowBuffer)}
+
+Center Pixel: ${sim.windowBuffer[2][2]}
+Calculated Median (Output): ${sim.lastMedian}
+
+1. What visual feature is this (Edge/Noise/Flat)?
+2. Why is the output ${sim.lastMedian}?`;
+
+            callGemini(prompt, context);
+        }
+    </script>
+</body>
+</html>

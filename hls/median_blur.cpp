@@ -31,6 +31,30 @@ void hls_bubble_sort(uint8_t input_arr[NUM_ELEMENTS], uint8_t &median) {
     median = arr[NUM_ELEMENTS / 2];
 }
 
+void hls_oddeven_sort_median(uint8_t input_arr[25], uint8_t &median) {
+    #pragma HLS INLINE
+    
+    // Pad 25 elements to 32 (next power of 2)
+    uint8_t padded[32];
+    #pragma HLS ARRAY_PARTITION variable=padded complete
+    
+    // Copy input and pad with maximum value (will sort to end)
+    for(int i = 0; i < 25; i++) {
+        #pragma HLS UNROLL
+        padded[i] = input_arr[i];
+    }
+    for(int i = 25; i < 32; i++) {
+        #pragma HLS UNROLL
+        padded[i] = 255; // Sentinel values sort to the end
+    }
+    
+    // Apply sorting network
+    batcher_sort_32(padded);
+    
+    // Median of 25 elements is at index 12 (0-indexed middle)
+    median = padded[12];
+}
+
 void median_blur(pixel_stream &src, pixel_stream &dst){
     #pragma HLS PIPELINE II=1
 
@@ -65,10 +89,8 @@ void median_blur(pixel_stream &src, pixel_stream &dst){
     uint8_t new_pixel = rgba2r(p_in.data); // Assuming grayscale in R channel
 
     // ----------------------------------------------------------------------
-    // 1. Update Line Buffer and Window Buffer
+    // 1. Shift window left
     // ----------------------------------------------------------------------
-
-    // Shift window left to make toom for new column
     for (int i = 0; i < K_SIZE; i++) {
         #pragma HLS UNROLL
         for (int j = 0; j < K_SIZE - 1; j++) {
@@ -76,8 +98,11 @@ void median_blur(pixel_stream &src, pixel_stream &dst){
             window_buffer[i][j] = window_buffer[i][j + 1];
         }
     }
-    
-    
+
+    // ----------------------------------------------------------------------
+    // 2. Fill rightmost column with edge replication for top border
+    //    (HLS-friendly: simplified conditionals using ternary MUX)
+    // ----------------------------------------------------------------------
     if (x < WIDTH) {
         uint8_t col_bank[K_SIZE - 1];
         #pragma HLS ARRAY_PARTITION variable=col_bank complete dim=0
@@ -91,7 +116,20 @@ void median_blur(pixel_stream &src, pixel_stream &dst){
             #pragma HLS UNROLL
             int idx = cnt + i;
             if (idx >= (K_SIZE - 1)) idx -= (K_SIZE - 1);
-            window_buffer[i][K_SIZE - 1] = col_bank[idx];
+            
+            // Calculate which actual image row this window position corresponds to
+            int src_row = (int)y - (K_SIZE - 1) + i;
+            
+            // HLS-friendly: Use simple ternary MUX instead of nested if-else
+            uint8_t selected_pixel;
+            if (src_row < 0) {
+                // Row doesn't exist - replicate edge
+                selected_pixel = (y == 0) ? new_pixel : col_bank[0];
+            } else {
+                // Row exists - use it normally
+                selected_pixel = col_bank[idx];
+            }
+            window_buffer[i][K_SIZE - 1] = selected_pixel;
         }
 
         window_buffer[K_SIZE - 1][K_SIZE - 1] = new_pixel;
@@ -99,40 +137,53 @@ void median_blur(pixel_stream &src, pixel_stream &dst){
     }
 
     // ----------------------------------------------------------------------
-    // 2. Median Calculation
+    // 3. Edge replication for left border
+    //    (HLS-friendly: fixed loop bounds, no outer conditional, MUX-based)
     // ----------------------------------------------------------------------
+    
+    // Pre-calculate edge values BEFORE the loop (cleaner for HLS)
+    uint8_t edge_vals[K_SIZE];
+    #pragma HLS ARRAY_PARTITION variable=edge_vals complete dim=0
+    for (int i = 0; i < K_SIZE; i++) {
+        #pragma HLS UNROLL
+        edge_vals[i] = window_buffer[i][K_SIZE - 1];
+    }
+    
+    // Fixed loop bounds with conditional assignment inside (MUX-based)
+    // No outer "if (x < K_SIZE - 1)" wrapper - the condition is inside
+    for (int i = 0; i < K_SIZE; i++) {
+        #pragma HLS UNROLL
+        for (int j = 0; j < K_SIZE - 1; j++) {
+            #pragma HLS UNROLL
+            if ((int)x < (K_SIZE - 1 - j)) {
+                window_buffer[i][j] = edge_vals[i];
+            }
+            // else: keep the shifted value (already in place from step 1)
+        }
+    }
 
-    // Copy metadata first (user/last/keep/strb/id/dest)
+    // ----------------------------------------------------------------------
+    // 4. ALWAYS compute median (no border condition!)
+    // ----------------------------------------------------------------------
     p_out = p_in;
 
-    // We can only compute median once we have filled the buffer enough
-    if (y >= K_SIZE - 1 && x >= K_SIZE - 1) {
-        // Flatten window for sorting
-        uint8_t flat_window[NUM_ELEMENTS];
-        #pragma HLS ARRAY_PARTITION variable=flat_window complete dim=0
+    uint8_t flat_window[NUM_ELEMENTS];
+    #pragma HLS ARRAY_PARTITION variable=flat_window complete dim=0
 
-        int idx = 0;
-        for(int i = 0; i < K_SIZE; i++) {
+    int flat_idx = 0;
+    for(int i = 0; i < K_SIZE; i++) {
+        #pragma HLS UNROLL
+        for(int j = 0; j < K_SIZE; j++) {
             #pragma HLS UNROLL
-            for(int j = 0; j < K_SIZE; j++) {
-                #pragma HLS UNROLL
-                flat_window[idx++] = window_buffer[i][j];
-            }
+            flat_window[flat_idx++] = window_buffer[i][j];
         }
-
-        // Compute median using bubble sort
-        uint8_t median_val;
-        hls_bubble_sort(flat_window, median_val);
-
-        // Prepare output pixel
-        p_out.data = r2rgba(median_val) | g2rgba(median_val) | b2rgba(median_val) |
-                     (p_in.data & 0xFF000000);
     }
-    else {
-        // Not enough data yet, fall back to pass-through pixel to avoid black borders
-        p_out.data = r2rgba(new_pixel) | g2rgba(new_pixel) | b2rgba(new_pixel) |
-                     (p_in.data & 0xFF000000);
-    }
+
+    uint8_t median_val;
+    hls_oddeven_sort_median(flat_window, median_val);
+
+    p_out.data = r2rgba(median_val) | g2rgba(median_val) | b2rgba(median_val) |
+                 (p_in.data & 0xFF000000);
 
     dst << p_out;
 
@@ -141,8 +192,7 @@ void median_blur(pixel_stream &src, pixel_stream &dst){
         y++;
         cnt++;
         if (cnt >= (K_SIZE - 1)) cnt = 0;
-    } 
-    else {
+    } else {
         x++;
     }
 }
