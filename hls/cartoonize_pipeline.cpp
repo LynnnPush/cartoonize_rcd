@@ -90,11 +90,20 @@ void pixel_passthrough(pixel_stream &src, pixel_stream &dst) {
 }
 
 // Full cartoonize pipeline: bilateral filter + adaptive threshold + mask composite
-void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst) {
+void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst,
+                            uint32_t mode) {
     #pragma HLS INTERFACE axis port=src
     #pragma HLS INTERFACE axis port=dst
+    #pragma HLS INTERFACE s_axilite port=mode
     #pragma HLS INTERFACE ap_ctrl_none port=return
     #pragma HLS DATAFLOW disable_start_propagation // Always processing frames, remove control gating that limits throughput
+
+    //Decode mode registers
+    bool en_bilateral = mode & MODE_BILATERAL;
+    bool en_gray      = mode & MODE_GRAY;
+    bool en_median    = mode & MODE_MEDIAN;
+    bool en_thresh    = mode & MODE_THRESHOLD;
+    bool en_mask      = mode & MODE_MASK;
 
     pixel_stream in_pix("in_pix");
     pixel_stream out_pix("out_pix");
@@ -119,11 +128,35 @@ void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst) {
     axis_to_pixel(src, in_pix);
 
     duplicate_stream(in_pix, raw_to_bilateral, raw_to_gray);
+
+    
+// ---- color path ----
+if (en_bilateral)
     bilateral_filter(raw_to_bilateral, color_stream);
+else
+    pixel_passthrough(raw_to_bilateral, color_stream);
+
+// ---- gray path ----
+if (en_gray)
     grayscale(raw_to_gray, gray_stream);
+else
+    pixel_passthrough(raw_to_gray, gray_stream);
+
+if (en_median)
     median_blur(gray_stream, median_stream);
+else
+    pixel_passthrough(gray_stream, median_stream);
+
+if (en_thresh)
     adaptive_threshold(median_stream, mask_stream);
+else
+    pixel_passthrough(median_stream, mask_stream);
+
+// ---- composite ----
+if (en_mask)
     bitwise_and_mask(color_stream, mask_stream, out_pix);
+else
+    pixel_passthrough(color_stream, out_pix);
 
     pixel_to_axis(out_pix, dst);
 }
@@ -134,7 +167,9 @@ void stream(pixel_stream &src, pixel_stream &dst, int frame) {
     axis_stream axis_src("axis_src");
     axis_stream axis_dst("axis_dst");
     
+    uint32_t mode = MODE_ALL;
+
     pixel_to_axis(src, axis_src);
-    cartoonize_pipeline_v2(axis_src, axis_dst);
+    cartoonize_pipeline_v2(axis_src, axis_dst, mode);
     axis_to_pixel(axis_dst, dst);
 }
