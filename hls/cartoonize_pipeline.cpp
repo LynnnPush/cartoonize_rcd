@@ -1,8 +1,5 @@
 #include "cartoonize_pipeline.h"
 
-// ----------------------------------------------------------------------
-// Helper: duplicate incoming stream to two outputs (one pixel per call)
-// ----------------------------------------------------------------------
 static void duplicate_stream(pixel_stream &src, pixel_stream &dst_a, pixel_stream &dst_b) {
     #pragma HLS INLINE off
     #pragma HLS PIPELINE II=1
@@ -12,9 +9,6 @@ static void duplicate_stream(pixel_stream &src, pixel_stream &dst_a, pixel_strea
     dst_b << p;
 }
 
-// ----------------------------------------------------------------------
-// Helper: AXI stream -> internal pixel stream (one pixel per call)
-// ----------------------------------------------------------------------
 static void axis_to_pixel(axis_stream &s_axis, pixel_stream &dst) {
     #pragma HLS INLINE off
     #pragma HLS PIPELINE II=1
@@ -33,9 +27,6 @@ static void axis_to_pixel(axis_stream &s_axis, pixel_stream &dst) {
     dst << p;
 }
 
-// ----------------------------------------------------------------------
-// Helper: simple mask-and operation (color & edge mask)
-// ----------------------------------------------------------------------
 static void bitwise_and_mask(pixel_stream &color, pixel_stream &mask, pixel_stream &dst) {
     #pragma HLS INLINE off
     #pragma HLS PIPELINE II=1
@@ -43,23 +34,18 @@ static void bitwise_and_mask(pixel_stream &color, pixel_stream &mask, pixel_stre
     color >> p_color;
     mask >> p_mask;
 
-    // mask uses grayscale replicated to RGB; use LSB byte
     uint8_t mask_val = (uint8_t)(p_mask.data & 0xFF);
 
-    p_out = p_color; // copy metadata (user/last)
+    p_out = p_color;
     if (mask_val > 0) {
         p_out.data = p_color.data;
     } else {
-        // Zero RGB but keep MSB/alpha metadata from the color stream
         p_out.data = (p_color.data & 0xFF000000);
     }
 
     dst << p_out;
 }
 
-// ----------------------------------------------------------------------
-// Helper: internal pixel stream -> AXI stream (one pixel per call)
-// ----------------------------------------------------------------------
 static void pixel_to_axis(pixel_stream &src, axis_stream &d_axis) {
     #pragma HLS INLINE off
     #pragma HLS PIPELINE II=1
@@ -78,9 +64,6 @@ static void pixel_to_axis(pixel_stream &src, axis_stream &d_axis) {
     d_axis << out_ax;
 }
 
-// ----------------------------------------------------------------------
-// Public helper: simple pass-through stage (one pixel per call)
-// ----------------------------------------------------------------------
 void pixel_passthrough(pixel_stream &src, pixel_stream &dst) {
     #pragma HLS INLINE off
     #pragma HLS PIPELINE II=1
@@ -89,26 +72,24 @@ void pixel_passthrough(pixel_stream &src, pixel_stream &dst) {
     dst << p;
 }
 
-// Full cartoonize pipeline: bilateral filter + adaptive threshold + mask composite
 void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst,
                             uint32_t mode) {
     #pragma HLS INTERFACE axis port=src
     #pragma HLS INTERFACE axis port=dst
     #pragma HLS INTERFACE s_axilite port=mode
     #pragma HLS INTERFACE ap_ctrl_none port=return
-    #pragma HLS DATAFLOW disable_start_propagation // Always processing frames, remove control gating that limits throughput
+    #pragma HLS DATAFLOW disable_start_propagation
 
-    // Decode mode selector
     bool en_bilateral = false;
     bool en_gray      = false;
     bool en_median    = false;
     bool en_thresh    = false;
     bool en_mask      = false;
+    bool out_gray     = false;
 
     switch ((FilterMode)mode) {
 
     case MODE_NONE:
-        // no filters
         break;
 
     case MODE_BILATERAL:
@@ -116,18 +97,20 @@ void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst,
         break;
 
     case MODE_GRAYSCALE:
-        en_gray = true;
+        en_gray  = true;
+        out_gray = true;
         break;
 
     case MODE_MEDIAN:
-        // median operates on grayscale
         en_gray   = true;
         en_median = true;
+        out_gray  = true;
         break;
 
     case MODE_GRAY_MEDIAN:
         en_gray   = true;
         en_median = true;
+        out_gray  = true;
         break;
 
     case MODE_FULL_CARTOON:
@@ -139,7 +122,6 @@ void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst,
         break;
 
     default:
-        // safety fallback
         break;
     }
 
@@ -147,7 +129,6 @@ void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst,
     pixel_stream out_pix("out_pix");
     #pragma HLS STREAM variable=in_pix depth=64
     #pragma HLS STREAM variable=out_pix depth=64
-
 
     pixel_stream raw_to_bilateral("raw_to_bilateral");
     pixel_stream raw_to_gray("raw_to_gray");
@@ -167,44 +148,41 @@ void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst,
 
     duplicate_stream(in_pix, raw_to_bilateral, raw_to_gray);
 
-    
-// ---- color path ----
-if (en_bilateral)
-    bilateral_filter(raw_to_bilateral, color_stream);
-else
-    pixel_passthrough(raw_to_bilateral, color_stream);
+    if (en_bilateral)
+        bilateral_filter(raw_to_bilateral, color_stream);
+    else
+        pixel_passthrough(raw_to_bilateral, color_stream);
 
-// ---- gray path ----
-if (en_gray)
-    grayscale(raw_to_gray, gray_stream);
-else
-    pixel_passthrough(raw_to_gray, gray_stream);
+    if (en_gray)
+        grayscale(raw_to_gray, gray_stream);
+    else
+        pixel_passthrough(raw_to_gray, gray_stream);
 
-if (en_median)
-    median_blur(gray_stream, median_stream);
-else
-    pixel_passthrough(gray_stream, median_stream);
+    if (en_median)
+        median_blur(gray_stream, median_stream);
+    else
+        pixel_passthrough(gray_stream, median_stream);
 
-if (en_thresh)
-    adaptive_threshold(median_stream, mask_stream);
-else
-    pixel_passthrough(median_stream, mask_stream);
+    if (en_thresh)
+        adaptive_threshold(median_stream, mask_stream);
+    else
+        pixel_passthrough(median_stream, mask_stream);
 
-// ---- composite ----
-if (en_mask)
-    bitwise_and_mask(color_stream, mask_stream, out_pix);
-else
-    pixel_passthrough(color_stream, out_pix);
+    if (en_mask)
+        bitwise_and_mask(color_stream, mask_stream, out_pix);
+    else if (out_gray)
+        pixel_passthrough(median_stream, out_pix);
+    else
+        pixel_passthrough(color_stream, out_pix);
 
     pixel_to_axis(out_pix, dst);
 }
 
-// Stream() function for streamulator testbench
 void stream(pixel_stream &src, pixel_stream &dst, int frame) {
     (void)frame;
     axis_stream axis_src("axis_src");
     axis_stream axis_dst("axis_dst");
-    
+
     uint32_t mode = MODE_FULL_CARTOON;
 
     pixel_to_axis(src, axis_src);
