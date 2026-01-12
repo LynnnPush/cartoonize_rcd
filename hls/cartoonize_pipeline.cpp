@@ -98,12 +98,50 @@ void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst,
     #pragma HLS INTERFACE ap_ctrl_none port=return
     #pragma HLS DATAFLOW disable_start_propagation // Always processing frames, remove control gating that limits throughput
 
-    //Decode mode registers
-    bool en_bilateral = mode & MODE_BILATERAL;
-    bool en_gray      = mode & MODE_GRAY;
-    bool en_median    = mode & MODE_MEDIAN;
-    bool en_thresh    = mode & MODE_THRESHOLD;
-    bool en_mask      = mode & MODE_MASK;
+    // Decode mode selector
+    bool en_bilateral = false;
+    bool en_gray      = false;
+    bool en_median    = false;
+    bool en_thresh    = false;
+    bool en_mask      = false;
+
+    switch ((FilterMode)mode) {
+
+    case MODE_NONE:
+        // no filters
+        break;
+
+    case MODE_BILATERAL:
+        en_bilateral = true;
+        break;
+
+    case MODE_GRAYSCALE:
+        en_gray = true;
+        break;
+
+    case MODE_MEDIAN:
+        // median operates on grayscale
+        en_gray   = true;
+        en_median = true;
+        break;
+
+    case MODE_GRAY_MEDIAN:
+        en_gray   = true;
+        en_median = true;
+        break;
+
+    case MODE_FULL_CARTOON:
+        en_bilateral = true;
+        en_gray      = true;
+        en_median    = true;
+        en_thresh    = true;
+        en_mask      = true;
+        break;
+
+    default:
+        // safety fallback
+        break;
+    }
 
     pixel_stream in_pix("in_pix");
     pixel_stream out_pix("out_pix");
