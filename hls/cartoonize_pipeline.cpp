@@ -205,7 +205,7 @@ void stream(pixel_stream &src, pixel_stream &dst, int frame) {
     axis_stream axis_src("axis_src");
     axis_stream axis_dst("axis_dst");
     
-    uint32_t mode = MODE_ALL;
+    uint32_t mode = MODE_FULL_CARTOON;
 
     pixel_to_axis(src, axis_src);
     cartoonize_pipeline_v2(axis_src, axis_dst, mode);
