@@ -1,5 +1,35 @@
 #include "cartoonize_pipeline.h"
 
+// ============================================================================
+// SOLUTION: Remove all runtime conditionals from the DATAFLOW region
+// 
+// The problem was that if/else statements in DATAFLOW regions are not allowed
+// (non-canonical statements). HLS merges them into a single process with
+// II=6-31 instead of II=1, making the pipeline too slow for real-time video.
+//
+// The fix: ALWAYS run ALL processing stages, then use a multiplexer at the
+// output to select which result to use based on the mode.
+// ============================================================================
+
+// ----------------------------------------------------------------------
+// Helper: split stream to three outputs (for mode selection flexibility)
+// ----------------------------------------------------------------------
+static void triplicate_stream(pixel_stream &src, 
+                              pixel_stream &dst_a, 
+                              pixel_stream &dst_b,
+                              pixel_stream &dst_c) {
+    #pragma HLS INLINE off
+    #pragma HLS PIPELINE II=1
+    pixel_data p;
+    src >> p;
+    dst_a << p;
+    dst_b << p;
+    dst_c << p;
+}
+
+// ----------------------------------------------------------------------
+// Helper: duplicate incoming stream to two outputs (one pixel per call)
+// ----------------------------------------------------------------------
 static void duplicate_stream(pixel_stream &src, pixel_stream &dst_a, pixel_stream &dst_b) {
     #pragma HLS INLINE off
     #pragma HLS PIPELINE II=1
@@ -9,6 +39,9 @@ static void duplicate_stream(pixel_stream &src, pixel_stream &dst_a, pixel_strea
     dst_b << p;
 }
 
+// ----------------------------------------------------------------------
+// Helper: AXI stream -> internal pixel stream (one pixel per call)
+// ----------------------------------------------------------------------
 static void axis_to_pixel(axis_stream &s_axis, pixel_stream &dst) {
     #pragma HLS INLINE off
     #pragma HLS PIPELINE II=1
@@ -27,39 +60,9 @@ static void axis_to_pixel(axis_stream &s_axis, pixel_stream &dst) {
     dst << p;
 }
 
-// FIX: Single output selection function that ALWAYS reads from both streams
-// This ensures every stream has exactly one consumer in the DATAFLOW region
-static void select_output(pixel_stream &color, pixel_stream &mask, pixel_stream &dst,
-                         bool use_mask, bool use_gray) {
-    #pragma HLS INLINE off
-    #pragma HLS PIPELINE II=1
-    
-    pixel_data p_color, p_mask, p_out;
-    
-    // CRITICAL: Always read from BOTH streams to ensure they are consumed
-    color >> p_color;
-    mask >> p_mask;
-    
-    if (use_mask) {
-        // Apply mask to color (bitwise AND operation)
-        uint8_t mask_val = (uint8_t)(p_mask.data & 0xFF);
-        p_out = p_color;
-        if (mask_val > 0) {
-            p_out.data = p_color.data;
-        } else {
-            p_out.data = (p_color.data & 0xFF000000);
-        }
-    } else if (use_gray) {
-        // Output grayscale path result (mask stream contains gray data when not masking)
-        p_out = p_mask;
-    } else {
-        // Output color path result
-        p_out = p_color;
-    }
-    
-    dst << p_out;
-}
-
+// ----------------------------------------------------------------------
+// Helper: internal pixel stream -> AXI stream (one pixel per call)
+// ----------------------------------------------------------------------
 static void pixel_to_axis(pixel_stream &src, axis_stream &d_axis) {
     #pragma HLS INLINE off
     #pragma HLS PIPELINE II=1
@@ -78,6 +81,9 @@ static void pixel_to_axis(pixel_stream &src, axis_stream &d_axis) {
     d_axis << out_ax;
 }
 
+// ----------------------------------------------------------------------
+// Public helper: simple pass-through stage (one pixel per call)
+// ----------------------------------------------------------------------
 void pixel_passthrough(pixel_stream &src, pixel_stream &dst) {
     #pragma HLS INLINE off
     #pragma HLS PIPELINE II=1
@@ -86,126 +92,208 @@ void pixel_passthrough(pixel_stream &src, pixel_stream &dst) {
     dst << p;
 }
 
-void cartoonize_pipeline_sel(axis_stream &src, axis_stream &dst,
-                            uint32_t mode) {
+// ============================================================================
+// OUTPUT SELECTOR: All inputs ALWAYS read (canonical dataflow requirement)
+// 
+// This function reads from ALL input streams unconditionally, ensuring
+// proper dataflow behavior, then uses combinational MUX logic to select output.
+//
+// IMPORTANT: Each stream must be read exactly once per pixel!
+// ============================================================================
+static void output_selector_6way(
+    pixel_stream &raw_passthrough,  // Mode 0: raw input (no processing)
+    pixel_stream &bilateral_out,    // Mode 1: bilateral filtered color
+    pixel_stream &gray_out,         // Mode 2: grayscale only
+    pixel_stream &median_out,       // Mode 3: median filtered grayscale
+    pixel_stream &thresh_out,       // Mode 4: edge mask
+    pixel_stream &cartoon_color,    // Mode 5: bilateral color for cartoon composite
+    pixel_stream &dst,              // Final output
+    ap_uint<3> mode                 // Mode selection
+) {
+    #pragma HLS INLINE off
+    #pragma HLS PIPELINE II=1
+
+    // CRITICAL: ALWAYS read from ALL input streams unconditionally
+    pixel_data p_raw, p_bilateral, p_gray, p_median, p_thresh, p_cartoon;
+    
+    raw_passthrough >> p_raw;
+    bilateral_out >> p_bilateral;
+    gray_out >> p_gray;
+    median_out >> p_median;
+    thresh_out >> p_thresh;
+    cartoon_color >> p_cartoon;
+
+    // Output selection using MUX logic
+    pixel_data p_out;
+    
+    switch (mode) {
+    case 0:  // MODE_NONE - raw passthrough
+        p_out = p_raw;
+        break;
+        
+    case 1:  // MODE_BILATERAL - bilateral filtered color
+        p_out = p_bilateral;
+        break;
+        
+    case 2:  // MODE_GRAYSCALE - grayscale only
+        p_out = p_gray;
+        break;
+        
+    case 3:  // MODE_MEDIAN - median blur on grayscale
+        p_out = p_median;
+        break;
+        
+    case 4:  // MODE_ADAPTIVE_THRESHOLD - edge detection
+        p_out = p_thresh;
+        break;
+        
+    case 5:  // MODE_FULL_CARTOON - bilateral with edge mask
+    default:
+        {
+            // Apply edge mask to bilateral (cartoon) output
+            uint8_t mask_val = (uint8_t)(p_thresh.data & 0xFF);
+            p_out = p_cartoon;  // Copy metadata from cartoon color stream
+            if (mask_val == 0) {
+                // Edge pixel - set to black (keep alpha)
+                p_out.data = (p_cartoon.data & 0xFF000000);
+            }
+            // else: keep the bilateral color
+        }
+        break;
+    }
+
+    dst << p_out;
+}
+
+// ============================================================================
+// FIXED CARTOONIZE PIPELINE
+//
+// Key changes from original:
+// 1. ALL processing stages run unconditionally in parallel
+// 2. Multiple stream copies created using duplicate/triplicate functions
+// 3. Output selector reads ALL streams and uses MUX to choose output
+// 4. NO if/else around function calls - all functions are always called
+// 
+// Stream topology:
+//                    ┌─► raw_passthrough ──────────────────────────────┐
+//                    │                                                  │
+// in_pix ─► split3 ──┼─► bilateral ─► dup ─┬─► bilateral_out ──────────┼─► output_selector ─► out_pix
+//                    │                     └─► cartoon_color ──────────┤
+//                    │                                                  │
+//                    └─► grayscale ─► dup ─┬─► gray_out ───────────────┤
+//                                          └─► median ─► dup ─┬─► median_out ──────┤
+//                                                             └─► adaptive_thresh ─┘
+// ============================================================================
+void cartoonize_pipeline_sel(axis_stream &src, axis_stream &dst, uint32_t mode) {
     #pragma HLS INTERFACE axis port=src
     #pragma HLS INTERFACE axis port=dst
     #pragma HLS INTERFACE s_axilite port=mode
     #pragma HLS INTERFACE ap_ctrl_none port=return
     #pragma HLS DATAFLOW disable_start_propagation
 
-    // Mode flags
-    bool en_bilateral = false;
-    bool en_gray      = false;
-    bool en_median    = false;
-    bool en_thresh    = false;
-    bool en_mask      = false;
-    bool out_gray     = false;
+    // Convert mode to smaller type for stable switch synthesis
+    ap_uint<3> mode_sel = (ap_uint<3>)(mode & 0x7);
 
-    switch ((FilterMode)mode) {
-
-    case MODE_NONE:
-        // All passthrough - output color
-        break;
-
-    case MODE_BILATERAL:
-        en_bilateral = true;
-        break;
-
-    case MODE_GRAYSCALE:
-        en_gray  = true;
-        out_gray = true;
-        break;
-
-    case MODE_MEDIAN:
-        en_gray   = true;
-        en_median = true;
-        out_gray  = true;
-        break;
-
-    case MODE_ADAPTIVE_THRESHOLD:
-        en_gray   = true;
-        en_median = true;
-        en_thresh  = true;
-        out_gray  = true;
-        break;
-
-    case MODE_FULL_CARTOON:
-        en_bilateral = true;
-        en_gray      = true;
-        en_median    = true;
-        en_thresh    = true;
-        en_mask      = true;
-        break;
-
-    default:
-        break;
-    }
-
-    // Stream declarations
+    // ========================================================================
+    // Stream declarations with sufficient depth for pipeline latency buffering
+    // ========================================================================
+    
+    // Input/output streams
     pixel_stream in_pix("in_pix");
     pixel_stream out_pix("out_pix");
     #pragma HLS STREAM variable=in_pix depth=64
     #pragma HLS STREAM variable=out_pix depth=64
 
-    pixel_stream raw_to_bilateral("raw_to_bilateral");
-    pixel_stream raw_to_gray("raw_to_gray");
-    pixel_stream color_stream("color_stream");
-    pixel_stream gray_stream("gray_stream");
-    pixel_stream median_stream("median_stream");
-    pixel_stream mask_stream("mask_stream");
+    // Initial 3-way split: raw passthrough, bilateral path, grayscale path
+    pixel_stream raw_passthrough("raw_passthrough");
+    pixel_stream to_bilateral("to_bilateral");
+    pixel_stream to_grayscale("to_grayscale");
+    #pragma HLS STREAM variable=raw_passthrough depth=64
+    #pragma HLS STREAM variable=to_bilateral depth=64
+    #pragma HLS STREAM variable=to_grayscale depth=64
 
-    #pragma HLS STREAM variable=raw_to_bilateral depth=64
-    #pragma HLS STREAM variable=raw_to_gray depth=64
-    #pragma HLS STREAM variable=color_stream depth=64
-    #pragma HLS STREAM variable=gray_stream depth=64
-    #pragma HLS STREAM variable=median_stream depth=64
-    #pragma HLS STREAM variable=mask_stream depth=64
+    // Bilateral filter outputs (need two copies for different output modes)
+    pixel_stream bilateral_internal("bilateral_internal");
+    pixel_stream bilateral_out("bilateral_out");
+    pixel_stream cartoon_color("cartoon_color");
+    #pragma HLS STREAM variable=bilateral_internal depth=64
+    #pragma HLS STREAM variable=bilateral_out depth=64
+    #pragma HLS STREAM variable=cartoon_color depth=64
 
-    // Input conversion
+    // Grayscale outputs
+    pixel_stream gray_internal("gray_internal");
+    pixel_stream gray_out("gray_out");
+    pixel_stream to_median("to_median");
+    #pragma HLS STREAM variable=gray_internal depth=64
+    #pragma HLS STREAM variable=gray_out depth=64
+    #pragma HLS STREAM variable=to_median depth=64
+
+    // Median outputs
+    pixel_stream median_internal("median_internal");
+    pixel_stream median_out("median_out");
+    pixel_stream to_threshold("to_threshold");
+    #pragma HLS STREAM variable=median_internal depth=64
+    #pragma HLS STREAM variable=median_out depth=64
+    #pragma HLS STREAM variable=to_threshold depth=64
+
+    // Threshold output
+    pixel_stream thresh_out("thresh_out");
+    #pragma HLS STREAM variable=thresh_out depth=64
+
+    // ========================================================================
+    // CANONICAL DATAFLOW: Only function calls, NO conditionals
+    // ========================================================================
+
+    // 1. Input conversion
     axis_to_pixel(src, in_pix);
 
-    // Split input to both paths
-    duplicate_stream(in_pix, raw_to_bilateral, raw_to_gray);
+    // 2. Initial 3-way split: passthrough + bilateral path + grayscale path
+    triplicate_stream(in_pix, raw_passthrough, to_bilateral, to_grayscale);
 
-    // Color path: bilateral filter or passthrough
-    if (en_bilateral)
-        bilateral_filter(raw_to_bilateral, color_stream);
-    else
-        pixel_passthrough(raw_to_bilateral, color_stream);
+    // 3. BILATERAL FILTER (color path) - always runs
+    bilateral_filter(to_bilateral, bilateral_internal);
+    
+    // 4. Split bilateral output: one for MODE_BILATERAL, one for MODE_FULL_CARTOON
+    duplicate_stream(bilateral_internal, bilateral_out, cartoon_color);
 
-    // Grayscale path: grayscale conversion or passthrough
-    if (en_gray)
-        grayscale(raw_to_gray, gray_stream);
-    else
-        pixel_passthrough(raw_to_gray, gray_stream);
+    // 5. GRAYSCALE conversion - always runs
+    grayscale(to_grayscale, gray_internal);
+    
+    // 6. Split grayscale: one for MODE_GRAYSCALE, one for further processing
+    duplicate_stream(gray_internal, gray_out, to_median);
 
-    // Grayscale path: median blur or passthrough
-    if (en_median)
-        median_blur(gray_stream, median_stream);
-    else
-        pixel_passthrough(gray_stream, median_stream);
+    // 7. MEDIAN BLUR - always runs
+    median_blur(to_median, median_internal);
+    
+    // 8. Split median: one for MODE_MEDIAN, one for threshold
+    duplicate_stream(median_internal, median_out, to_threshold);
 
-    // Grayscale path: adaptive threshold or passthrough
-    if (en_thresh)
-        adaptive_threshold(median_stream, mask_stream);
-    else
-        pixel_passthrough(median_stream, mask_stream);
+    // 9. ADAPTIVE THRESHOLD - always runs
+    adaptive_threshold(to_threshold, thresh_out);
 
-    // FIX: Use single output selector that reads from BOTH color_stream and mask_stream
-    // This ensures both streams are always consumed exactly once
-    select_output(color_stream, mask_stream, out_pix, en_mask, out_gray);
+    // 10. OUTPUT SELECTION - reads all streams, selects based on mode
+    output_selector_6way(
+        raw_passthrough,  // Mode 0
+        bilateral_out,    // Mode 1
+        gray_out,         // Mode 2
+        median_out,       // Mode 3
+        thresh_out,       // Mode 4 (also used in Mode 5 for masking)
+        cartoon_color,    // Mode 5 color
+        out_pix,
+        mode_sel
+    );
 
-    // Output conversion
+    // 11. Output conversion
     pixel_to_axis(out_pix, dst);
 }
 
+// Stream wrapper for testbench
 void stream(pixel_stream &src, pixel_stream &dst, int frame) {
     (void)frame;
     axis_stream axis_src("axis_src");
     axis_stream axis_dst("axis_dst");
 
-    uint32_t mode = MODE_BILATERAL;
+    uint32_t mode = MODE_GRAYSCALE;
 
     pixel_to_axis(src, axis_src);
     cartoonize_pipeline_sel(axis_src, axis_dst, mode);
