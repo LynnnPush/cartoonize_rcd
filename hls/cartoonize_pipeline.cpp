@@ -27,22 +27,36 @@ static void axis_to_pixel(axis_stream &s_axis, pixel_stream &dst) {
     dst << p;
 }
 
-static void bitwise_and_mask(pixel_stream &color, pixel_stream &mask, pixel_stream &dst) {
+// FIX: Single output selection function that ALWAYS reads from both streams
+// This ensures every stream has exactly one consumer in the DATAFLOW region
+static void select_output(pixel_stream &color, pixel_stream &mask, pixel_stream &dst,
+                         bool use_mask, bool use_gray) {
     #pragma HLS INLINE off
     #pragma HLS PIPELINE II=1
+    
     pixel_data p_color, p_mask, p_out;
+    
+    // CRITICAL: Always read from BOTH streams to ensure they are consumed
     color >> p_color;
     mask >> p_mask;
-
-    uint8_t mask_val = (uint8_t)(p_mask.data & 0xFF);
-
-    p_out = p_color;
-    if (mask_val > 0) {
-        p_out.data = p_color.data;
+    
+    if (use_mask) {
+        // Apply mask to color (bitwise AND operation)
+        uint8_t mask_val = (uint8_t)(p_mask.data & 0xFF);
+        p_out = p_color;
+        if (mask_val > 0) {
+            p_out.data = p_color.data;
+        } else {
+            p_out.data = (p_color.data & 0xFF000000);
+        }
+    } else if (use_gray) {
+        // Output grayscale path result (mask stream contains gray data when not masking)
+        p_out = p_mask;
     } else {
-        p_out.data = (p_color.data & 0xFF000000);
+        // Output color path result
+        p_out = p_color;
     }
-
+    
     dst << p_out;
 }
 
@@ -72,7 +86,7 @@ void pixel_passthrough(pixel_stream &src, pixel_stream &dst) {
     dst << p;
 }
 
-void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst,
+void cartoonize_pipeline_sel(axis_stream &src, axis_stream &dst,
                             uint32_t mode) {
     #pragma HLS INTERFACE axis port=src
     #pragma HLS INTERFACE axis port=dst
@@ -80,6 +94,7 @@ void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst,
     #pragma HLS INTERFACE ap_ctrl_none port=return
     #pragma HLS DATAFLOW disable_start_propagation
 
+    // Mode flags
     bool en_bilateral = false;
     bool en_gray      = false;
     bool en_median    = false;
@@ -90,6 +105,7 @@ void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst,
     switch ((FilterMode)mode) {
 
     case MODE_NONE:
+        // All passthrough - output color
         break;
 
     case MODE_BILATERAL:
@@ -107,9 +123,10 @@ void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst,
         out_gray  = true;
         break;
 
-    case MODE_GRAY_MEDIAN:
+    case MODE_ADAPTIVE_THRESHOLD:
         en_gray   = true;
         en_median = true;
+        en_thresh  = true;
         out_gray  = true;
         break;
 
@@ -125,6 +142,7 @@ void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst,
         break;
     }
 
+    // Stream declarations
     pixel_stream in_pix("in_pix");
     pixel_stream out_pix("out_pix");
     #pragma HLS STREAM variable=in_pix depth=64
@@ -144,37 +162,41 @@ void cartoonize_pipeline_v2(axis_stream &src, axis_stream &dst,
     #pragma HLS STREAM variable=median_stream depth=64
     #pragma HLS STREAM variable=mask_stream depth=64
 
+    // Input conversion
     axis_to_pixel(src, in_pix);
 
+    // Split input to both paths
     duplicate_stream(in_pix, raw_to_bilateral, raw_to_gray);
 
+    // Color path: bilateral filter or passthrough
     if (en_bilateral)
         bilateral_filter(raw_to_bilateral, color_stream);
     else
         pixel_passthrough(raw_to_bilateral, color_stream);
 
+    // Grayscale path: grayscale conversion or passthrough
     if (en_gray)
         grayscale(raw_to_gray, gray_stream);
     else
         pixel_passthrough(raw_to_gray, gray_stream);
 
+    // Grayscale path: median blur or passthrough
     if (en_median)
         median_blur(gray_stream, median_stream);
     else
         pixel_passthrough(gray_stream, median_stream);
 
+    // Grayscale path: adaptive threshold or passthrough
     if (en_thresh)
         adaptive_threshold(median_stream, mask_stream);
     else
         pixel_passthrough(median_stream, mask_stream);
 
-    if (en_mask)
-        bitwise_and_mask(color_stream, mask_stream, out_pix);
-    else if (out_gray)
-        pixel_passthrough(median_stream, out_pix);
-    else
-        pixel_passthrough(color_stream, out_pix);
+    // FIX: Use single output selector that reads from BOTH color_stream and mask_stream
+    // This ensures both streams are always consumed exactly once
+    select_output(color_stream, mask_stream, out_pix, en_mask, out_gray);
 
+    // Output conversion
     pixel_to_axis(out_pix, dst);
 }
 
@@ -183,9 +205,9 @@ void stream(pixel_stream &src, pixel_stream &dst, int frame) {
     axis_stream axis_src("axis_src");
     axis_stream axis_dst("axis_dst");
 
-    uint32_t mode = MODE_FULL_CARTOON;
+    uint32_t mode = MODE_BILATERAL;
 
     pixel_to_axis(src, axis_src);
-    cartoonize_pipeline_v2(axis_src, axis_dst, mode);
+    cartoonize_pipeline_sel(axis_src, axis_dst, mode);
     axis_to_pixel(axis_dst, dst);
 }
