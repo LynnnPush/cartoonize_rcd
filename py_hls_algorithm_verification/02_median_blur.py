@@ -85,7 +85,7 @@ def median_blur_line_buffer_model(img, ksize=K_SIZE):
 
 def main():
     # Use output from first step as input
-    input_path = "D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\output\\step1_gray_delft_2.png"
+    input_path = "D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\output\\step1_gray_delft.png"
     img = cv2.imread(input_path, cv2.IMREAD_GRAYSCALE)
     
     if img is None:
@@ -96,7 +96,7 @@ def main():
     blurred = median_blur_line_buffer_model(img)
     
     # Save in same output folder with new filename
-    output_path = "D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\output\\step2_median_blur_delft_2.png"
+    output_path = "D:\\PracticeProject\\TUD_RClab\\cartoonize_rcd\\py_cartoonize_byStep\\output\\step2_median_blur_delft.png"
     cv2.imwrite(output_path, blurred)
     print(f"Saved {output_path}")
 
