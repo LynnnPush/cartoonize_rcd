@@ -6,7 +6,7 @@ from utils import create_output_dir, log_performance, load_image
 
 STAGE_NAME = "03_adaptive_threshold"
 # Picking one "best" result from previous stage as input
-INPUT_PATH = "output_opencv/02_median_blur/median_k7.png" 
+INPUT_PATH = "output_opencv/02_median_blur/median_k5.png" 
 OUTPUT_DIR = create_output_dir(STAGE_NAME)
 process = psutil.Process(os.getpid())
 
@@ -20,8 +20,8 @@ def run_stage():
     
     # Parameters to test
     # blockSize must be odd
-    block_sizes = [9, 11, 13, 15] 
-    c_values = [2, 5, 9, 12]
+    block_sizes = [5, 9, 11, 13, 15] 
+    c_values = [2, 5, 7, 9, 12]
 
     for bs in block_sizes:
         for c in c_values:
