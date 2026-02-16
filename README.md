@@ -3,7 +3,7 @@
 Real-time video cartoonization pipeline implemented as an FPGA hardware accelerator using High-Level Synthesis (HLS), targeting the PYNQ-Z2 board with live 720p60 HDMI streaming.
 
 > **Course:** CESE4090 — Reconfigurable Computing Design, TU Delft  
-> **Authors:** Shanghong Lin, Hugues Delsaut, Castello Leonardo (Group 8)
+> **Authors:** Shanghong Lin, Hugues Delsaut, Castello Leonardo
 
 ---
 
